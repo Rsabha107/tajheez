@@ -121,6 +121,22 @@ import { Head, Link } from "@inertiajs/vue3";
           </ul>
         </li>
 
+        <!-- material planning -->
+        <li class="menu-title" key="t-planning">Planning</li>
+        <li>
+          <a class="has-arrow waves-effect" href="javascript: void(0);">
+            <i class="bx bx-package"> </i>
+            <span key="t-material-planning"> Material Planning </span>
+          </a>
+          <ul aria-expanded="false" class="sub-menu">
+            <li>
+              <Link :href="route('material-planning.index')" key="t-mp-index">
+                Overview
+              </Link>
+            </li>
+          </ul>
+        </li>
+
         <!-- security -->
         <li class="menu-title" key="t-ems">EMS</li>
         <li>

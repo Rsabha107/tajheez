@@ -2,105 +2,128 @@
 @tailwind components;
 @tailwind utilities; */
 
+/* ============================================================
+   Design Tokens — Warm Teal palette (Material Planning theme)
+   Primary: #0f766e  |  Body bg: #f6f5f1  |  Border: #e8e4db
+   ============================================================ */
 :root {
-    --primary-rgb: 85, 110, 230;
-    --pagination-active-bg: rgba(var(--primary-rgb), 0.7);
-    --bs-btn-bg: rgba(var(--primary-rgb), 1) !important;
+    /* Primary teal (replaces old blue #556ee6) */
+    --primary-rgb: 15, 118, 110;
+    --primary: #0f766e;
+    --primary-light: rgba(15, 118, 110, 0.12);
+    --pagination-active-bg: rgba(15, 118, 110, 0.9);
+    --bs-btn-bg: rgba(15, 118, 110, 1) !important;
+
+    /* Warm surface palette */
+    --body-bg: #f6f5f1;
+    --topbar-bg: #ffffff;
+    --sidebar-bg: #ffffff;
+    --card-bg: #ffffff;
+    --surface-subtle: #fbfaf6;
+
+    /* Borders */
+    --border-warm: #e8e4db;
+    --bs-border-color: #e8e4db;
+    --bs-border-color-translucent: rgba(232, 228, 219, 0.175);
+
+    /* Text */
+    --text-strong: #1a1614;
+    --text-muted-warm: #76706a;
 }
 
-.btn {
-    background-color: var(--bs-btn-bg);
-    border-color: var(--pagination-active-bg);
+/* ── Body background ── */
+body {
+    background-color: var(--body-bg) !important;
 }
 
-.navbar-header .dropdown .show.header-item {
-    background-color: var(--pagination-active-bg);
-}
-
+/* ── Topbar — light/cream to match design ── */
 #page-topbar {
     position: fixed;
     top: 0;
     right: 0;
     left: 0;
     z-index: 1002;
-
-    /* background: #1f326e; */
-    background: var(--pagination-active-bg);
-    /* background: 
-        linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)),
-        url('/assets/img/background/wo_logo/P3-P4-P5-P6_1920x1080_pxl.png'); */
-
+    background: var(--topbar-bg);
     background-size: cover;
     background-repeat: no-repeat;
     background-position: center;
-
-    box-shadow: 0 0.75rem 1.5rem rgba(18, 38, 63, 0.03);
-    border-bottom: 1px solid var(--bs-border-color);
+    box-shadow: 0 1px 0 var(--border-warm);
+    border-bottom: 1px solid var(--border-warm);
 }
 
-.text-primary {
-    --bs-text-opacity: 1;
-    color: var(--pagination-active-bg) !important;
+/* ── Sidebar border ── */
+.vertical-menu {
+    background: var(--sidebar-bg) !important;
+    border-right: 1px solid var(--border-warm) !important;
+    box-shadow: none !important;
+}
+
+/* ── Active sidebar nav color — override hardcoded #556ee6 ── */
+.mm-active,
+.mm-active > a,
+#sidebar-menu .mm-active > a,
+#sidebar-menu .mm-active > a i,
+#sidebar-menu .mm-active .active,
+#sidebar-menu ul li a.active,
+#sidebar-menu ul li ul.sub-menu li a.active {
+    color: var(--primary) !important;
+}
+
+#sidebar-menu > ul > li > a.mm-active,
+#sidebar-menu > ul > li.mm-active > a {
+    background-color: var(--primary-light) !important;
+    border-radius: 6px;
+    color: var(--primary) !important;
+}
+
+/* ── Buttons ── */
+.btn {
+    background-color: var(--bs-btn-bg);
+    border-color: var(--pagination-active-bg);
 }
 
 .btn-primary {
     --bs-btn-color: #fff;
-    --bs-btn-bg: var(--pagination-active-bg);
-    --bs-btn-border-color: var(--pagination-active-bg);
+    --bs-btn-bg: var(--primary);
+    --bs-btn-border-color: var(--primary);
     --bs-btn-hover-color: #fff;
-    --bs-btn-hover-bg: rgba(var(--primary-rgb), 0.8);
-    --bs-btn-hover-border-color: rgba(var(--primary-rgb), 0.8);
-    --bs-btn-focus-shadow-rgb: 49, 132, 253;
+    --bs-btn-hover-bg: #0d9488;
+    --bs-btn-hover-border-color: #0d9488;
+    --bs-btn-focus-shadow-rgb: 15, 118, 110;
     --bs-btn-active-color: #fff;
-    --bs-btn-active-bg: #0a58ca;
-    --bs-btn-active-border-color: #0a53be;
+    --bs-btn-active-bg: #115e59;
+    --bs-btn-active-border-color: #115e59;
     --bs-btn-active-shadow: inset 0 3px 5px rgba(0, 0, 0, 0.125);
     --bs-btn-disabled-color: #fff;
-    --bs-btn-disabled-bg: #0d6efd;
-    --bs-btn-disabled-border-color: #0d6efd;
+    --bs-btn-disabled-bg: var(--primary);
+    --bs-btn-disabled-border-color: var(--primary);
 }
 
-.badge-count[data-v-acf13b09] {
-    display: inline-block;
-    background: #eef2ff;
-    color: var(--pagination-active-bg);
-    font-size: 11px;
-    font-weight: 700;
-    border-radius: 50px;
-    padding: 1px 8px;
-    margin-left: 6px;
+/* ── Text primary ── */
+.text-primary {
+    --bs-text-opacity: 1;
+    color: var(--primary) !important;
 }
 
-.form-check-input:checked {
-    background-color: var(--pagination-active-bg);
-    border-color: var(--pagination-active-bg);
+/* ── Active dropdown/navbar item ── */
+.navbar-header .dropdown .show.header-item {
+    background-color: var(--primary-light);
 }
 
-.fixed-table-toolbar .dropdown-menu .form-check-input:checked {
-    background-color: var(--pagination-active-bg);
-    border-color: var(--pagination-active-bg);
+/* ── Toolbar strip on bootstrap-table ── */
+.fixed-table-toolbar {
+    background: var(--pagination-active-bg);
+    padding: 14px 20px;
+    display: flex !important;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
 }
 
-.btn-check:checked + .btn,
-.btn.active,
-.btn.show,
-.btn:first-child:active,
-:not(.btn-check) + .btn:active {
-    color: var(--bs-btn-active-color);
-    background-color: var(--pagination-active-bg);
-    border-color: var(--pagination-active-bg);
-}
-
-.dropdown-item.active,
-.dropdown-item:active {
-    color: var(--bs-dropdown-link-active-color);
-    text-decoration: none;
-    background-color: var(--pagination-active-bg);
-}
-
+/* ── Pagination ── */
 .fixed-table-pagination .page-size {
     border-radius: 50px;
-    border: 1.5px solid #dde3f0;
+    border: 1.5px solid var(--border-warm);
     padding: 4px 12px;
     font-size: 13px;
     color: #fff;
@@ -119,8 +142,49 @@
     border: none;
 }
 
-/* end of table colors */
+/* ── Checkboxes ── */
+.form-check-input:checked {
+    background-color: var(--pagination-active-bg);
+    border-color: var(--pagination-active-bg);
+}
 
+.fixed-table-toolbar .dropdown-menu .form-check-input:checked {
+    background-color: var(--pagination-active-bg);
+    border-color: var(--pagination-active-bg);
+}
+
+/* ── Active state buttons ── */
+.btn-check:checked + .btn,
+.btn.active,
+.btn.show,
+.btn:first-child:active,
+:not(.btn-check) + .btn:active {
+    color: var(--bs-btn-active-color);
+    background-color: var(--pagination-active-bg);
+    border-color: var(--pagination-active-bg);
+}
+
+/* ── Dropdown active items ── */
+.dropdown-item.active,
+.dropdown-item:active {
+    color: var(--bs-dropdown-link-active-color);
+    text-decoration: none;
+    background-color: var(--pagination-active-bg);
+}
+
+/* ── Badge count pill ── */
+.badge-count[data-v-acf13b09] {
+    display: inline-block;
+    background: #ccfbf1;
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 50px;
+    padding: 1px 8px;
+    margin-left: 6px;
+}
+
+/* ── Auth pages ── */
 .login-bg {
     background: url("/assets/img/background/P1-P2_1920x1080_pxl.png");
     background-size: cover;
@@ -136,13 +200,18 @@
     background-repeat: no-repeat;
 }
 
+/* ── Breadcrumb ── */
+.p-breadcrumb {
+    background: transparent !important;
+}
+
 /* =========================
-   Roles Table Styling
+   Roles / general Table Styling
 ========================= */
 
 .roles-table-wrapper .roles-table-card {
-    background: #fff;
-    border: 1px solid #e9edf5;
+    background: var(--card-bg);
+    border: 1px solid var(--border-warm);
     border-radius: 18px;
     padding: 1rem;
 }
@@ -154,28 +223,15 @@
     min-height: 42px;
 }
 
-.fixed-table-toolbar {
-    /* background: linear-gradient(135deg, #ec9674 0%, #ec9674 55%, #ec9674 100%); */
-    /* background: rgba(85, 110, 230, 0.70); */
-    background: var(--pagination-active-bg);
-    /* background: linear-gradient(135deg, #1f326e 0%, #043399 55%, #1f326e 100%); */
-    /* background: linear-gradient(135deg, #3a5bd9 0%, #5b8df6 55%, #7ec8f8 100%); */
-    padding: 14px 20px;
-    display: flex !important;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: nowrap;
-}
-
 .roles-table-wrapper .bootstrap-table .fixed-table-container {
-    border: 1px solid #e9edf5 !important;
+    border: 1px solid var(--border-warm) !important;
     border-radius: 18px !important;
     overflow: hidden;
-    background: #fff;
+    background: var(--card-bg);
 }
 
 .roles-table-wrapper .bootstrap-table .fixed-table-header {
-    background: #f8fafc;
+    background: var(--surface-subtle);
 }
 
 .roles-table-wrapper .bootstrap-table .fixed-table-body {
@@ -188,9 +244,9 @@
 }
 
 .roles-table-wrapper .bootstrap-table .table thead th {
-    background: #f8fafc !important;
-    border-bottom: 1px solid #e9edf5 !important;
-    color: #344054 !important;
+    background: var(--surface-subtle) !important;
+    border-bottom: 1px solid var(--border-warm) !important;
+    color: var(--text-strong) !important;
     font-weight: 600;
     vertical-align: middle;
     white-space: nowrap;
@@ -199,7 +255,7 @@
 }
 
 .roles-table-wrapper .bootstrap-table .table tbody td {
-    border-color: #edf1f7;
+    border-color: var(--border-warm);
     vertical-align: middle;
     padding-top: 14px;
     padding-bottom: 14px;
@@ -208,16 +264,16 @@
 .roles-table-wrapper .bootstrap-table .filter-control,
 .roles-table-wrapper .bootstrap-table select.form-control,
 .roles-table-wrapper .bootstrap-table input.form-control {
-    border: 1px solid #dbe3ef !important;
+    border: 1px solid var(--border-warm) !important;
     border-radius: 10px !important;
     min-height: 36px;
     font-size: 13px;
-    background-color: #fff !important;
+    background-color: var(--card-bg) !important;
     box-shadow: none !important;
 }
 
 .roles-table-wrapper .bootstrap-table .table-hover tbody tr:hover {
-    background-color: #f9fbff;
+    background-color: var(--surface-subtle);
 }
 
 .roles-table-wrapper .page-item.active .page-link {
@@ -263,6 +319,35 @@
     justify-content: center;
 }
 
-.p-breadcrumb {
-    background: transparent !important;
+/* ── Override hardcoded blue highlights from app.min.css ── */
+.bg-primary,
+.avatar-title.bg-primary {
+    background-color: var(--primary) !important;
+}
+
+.bg-primary-subtle {
+    background-color: var(--primary-light) !important;
+}
+
+a.text-primary,
+.text-primary {
+    color: var(--primary) !important;
+}
+
+.border-primary {
+    border-color: var(--primary) !important;
+}
+
+/* Cards — warm border */
+.card {
+    border-color: var(--border-warm) !important;
+}
+
+/* Page-title breadcrumb area background */
+.page-title-box {
+    background: var(--surface-subtle);
+    border-radius: 8px;
+    padding: 12px 16px;
+    border: 1px solid var(--border-warm);
+    margin-bottom: 16px;
 }

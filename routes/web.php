@@ -11,6 +11,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\RolesPermissionController;
+use App\Http\Controllers\MaterialPlanningController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserExportController;
 use Illuminate\Foundation\Application;
@@ -140,6 +141,8 @@ Route::middleware('auth')->group(function () {
     });
 
     Route::inertia('mypage', 'Mypage')->name('mypage');
+
+    Route::get('/material-planning', [MaterialPlanningController::class, 'index'])->name('material-planning.index');
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

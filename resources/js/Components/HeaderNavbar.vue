@@ -35,7 +35,7 @@ import { Link } from "@inertiajs/vue3";
         </Link>
       </div>
       <button
-        class="btn btn-sm text-white px-3 font-size-16 header-item waves-effect"
+        class="btn btn-sm px-3 font-size-16 header-item waves-effect"
         id="vertical-menu-btn"
         type="button"
       >
@@ -353,7 +353,7 @@ import { Link } from "@inertiajs/vue3";
           data-bs-toggle="dropdown"
           type="button"
         >
-          <i class="bx bx-customize text-white"> </i>
+          <i class="bx bx-customize"> </i>
         </button>
         <div class="dropdown-menu dropdown-menu-lg dropdown-menu-end">
           <div class="px-lg-2">
@@ -412,7 +412,7 @@ import { Link } from "@inertiajs/vue3";
           data-bs-toggle="fullscreen"
           type="button"
         >
-          <i class="bx bx-fullscreen text-white"> </i>
+          <i class="bx bx-fullscreen"> </i>
         </button>
       </div>
       <div class="dropdown d-inline-block">
@@ -424,7 +424,7 @@ import { Link } from "@inertiajs/vue3";
           id="page-header-notifications-dropdown"
           type="button"
         >
-          <i class="bx bx-bell bx-tada text-white"> </i>
+          <i class="bx bx-bell bx-tada"> </i>
           <span class="badge bg-danger rounded-pill"> 3 </span>
         </button>
         <div
@@ -556,10 +556,10 @@ import { Link } from "@inertiajs/vue3";
             class="rounded-circle header-profile-user"
             src="assets/images/users/sparkle_hrms.jpg"
           />
-          <span class="d-none d-xl-inline-block ms-1 text-white" key="t-StarCode Kh">
+          <span class="d-none d-xl-inline-block ms-1" key="t-StarCode Kh">
             {{ $page.props.auth.user.name }}
           </span>
-          <i class="mdi mdi-chevron-down d-none d-xl-inline-block text-white"> </i>
+          <i class="mdi mdi-chevron-down d-none d-xl-inline-block"> </i>
         </button>
         <div class="dropdown-menu dropdown-menu-end">
           <!-- item-->

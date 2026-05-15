@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-Item 'c:\\\\Users\\\\r.sabha\\\\Downloads\\\\Tajheez_ Material Planning _standalone_.html' | Select-Object Length\")",
+      "Bash(powershell -Command ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
