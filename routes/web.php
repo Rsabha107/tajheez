@@ -12,6 +12,15 @@ use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\RolesPermissionController;
 use App\Http\Controllers\MaterialPlanningController;
+use App\Http\Controllers\MaterialPlanning\AreaController;
+use App\Http\Controllers\MaterialPlanning\CatalogItemController;
+use App\Http\Controllers\MaterialPlanning\ChangeOrderController;
+use App\Http\Controllers\MaterialPlanning\ChangeOrderLineController;
+use App\Http\Controllers\MaterialPlanning\MaterialRequestController;
+use App\Http\Controllers\MaterialPlanning\RequestLineController;
+use App\Http\Controllers\MaterialPlanning\ServiceOptionController;
+use App\Http\Controllers\MaterialPlanning\SpaceController;
+use App\Http\Controllers\MaterialPlanning\SupplierController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserExportController;
 use Illuminate\Foundation\Application;
@@ -143,6 +152,64 @@ Route::middleware('auth')->group(function () {
     Route::inertia('mypage', 'Mypage')->name('mypage');
 
     Route::get('/material-planning', [MaterialPlanningController::class, 'index'])->name('material-planning.index');
+
+    Route::controller(CatalogItemController::class)->group(function () {
+        Route::post('/api/mp/catalog-items', 'store')->name('mp.catalog-items.store');
+        Route::put('/api/mp/catalog-items/{catalogItem:sku}', 'update')->name('mp.catalog-items.update');
+        Route::delete('/api/mp/catalog-items/{catalogItem:sku}', 'destroy')->name('mp.catalog-items.destroy');
+    });
+
+    Route::controller(ServiceOptionController::class)->group(function () {
+        Route::post('/api/mp/service-options', 'store')->name('mp.service-options.store');
+        Route::put('/api/mp/service-options/{serviceOption}', 'update')->name('mp.service-options.update');
+        Route::delete('/api/mp/service-options/{serviceOption}', 'destroy')->name('mp.service-options.destroy');
+    });
+
+    Route::controller(SupplierController::class)->group(function () {
+        Route::get('/api/mp/suppliers', 'data')->name('mp.suppliers.data');
+        Route::post('/api/mp/suppliers', 'store')->name('mp.suppliers.store');
+        Route::put('/api/mp/suppliers/{supplier:code}', 'update')->name('mp.suppliers.update');
+        Route::delete('/api/mp/suppliers/{supplier:code}', 'destroy')->name('mp.suppliers.destroy');
+    });
+
+    Route::controller(AreaController::class)->group(function () {
+        Route::get('/api/mp/areas', 'data')->name('mp.areas.data');
+        Route::post('/api/mp/areas', 'store')->name('mp.areas.store');
+        Route::put('/api/mp/areas/{area:code}', 'update')->name('mp.areas.update');
+        Route::delete('/api/mp/areas/{area:code}', 'destroy')->name('mp.areas.destroy');
+    });
+
+    Route::controller(SpaceController::class)->group(function () {
+        Route::get('/api/mp/spaces', 'data')->name('mp.spaces.data');
+        Route::post('/api/mp/spaces', 'store')->name('mp.spaces.store');
+        Route::put('/api/mp/spaces/{space}', 'update')->name('mp.spaces.update');
+        Route::delete('/api/mp/spaces/{space}', 'destroy')->name('mp.spaces.destroy');
+    });
+
+    Route::controller(MaterialRequestController::class)->group(function () {
+        Route::post('/api/mp/requests', 'store')->name('mp.requests.store');
+        Route::put('/api/mp/requests/{materialRequest}', 'update')->name('mp.requests.update');
+        Route::post('/api/mp/requests/{materialRequest}/submit', 'submit')->name('mp.requests.submit');
+        Route::delete('/api/mp/requests/{materialRequest}', 'destroy')->name('mp.requests.destroy');
+    });
+
+    Route::controller(RequestLineController::class)->group(function () {
+        Route::post('/api/mp/requests/{materialRequest}/lines', 'store')->name('mp.request-lines.store');
+        Route::put('/api/mp/request-lines/{requestLine}', 'update')->name('mp.request-lines.update');
+        Route::delete('/api/mp/request-lines/{requestLine}', 'destroy')->name('mp.request-lines.destroy');
+    });
+
+    Route::controller(ChangeOrderController::class)->group(function () {
+        Route::post('/api/mp/change-orders', 'store')->name('mp.change-orders.store');
+        Route::put('/api/mp/change-orders/{changeOrder}', 'update')->name('mp.change-orders.update');
+        Route::delete('/api/mp/change-orders/{changeOrder}', 'destroy')->name('mp.change-orders.destroy');
+    });
+
+    Route::controller(ChangeOrderLineController::class)->group(function () {
+        Route::post('/api/mp/change-orders/{changeOrder}/lines', 'store')->name('mp.change-order-lines.store');
+        Route::put('/api/mp/change-order-lines/{changeOrderLine}', 'update')->name('mp.change-order-lines.update');
+        Route::delete('/api/mp/change-order-lines/{changeOrderLine}', 'destroy')->name('mp.change-order-lines.destroy');
+    });
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

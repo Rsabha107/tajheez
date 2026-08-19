@@ -1,13 +1,17 @@
 <script setup>
 import { ref, computed } from 'vue';
+import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
 
 const props = defineProps({
-    requests: Array,
-    detailId: { type: String, default: null },
-    domains:  Array,
-    venues:   Array,
-    statuses: Object,
-    people:   Array,
+    requests:    Array,
+    detailId:    { type: String, default: null },
+    domains:     Array,
+    venues:      Array,
+    statuses:    Object,
+    people:      Array,
+    catalog:     { type: Array, default: () => [] },
+    suppliers:   { type: Array, default: () => [] },
+    permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
 });
 
 const emit = defineEmits(['go-to']);
@@ -67,6 +71,18 @@ function domainOf(id)  { return props.domains.find(d => d.id === id) || props.do
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function personOf(ini) { return props.people.find(p => p.initials === ini) || props.people[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
+function catalogOf(sku) { return props.catalog.find(c => c.sku === sku); }
+
+// ── Add service option (domain managers + admins only) ───────────────────────
+function canAddServiceOption(domain) {
+    return props.permissions.isAdmin || props.permissions.managedDomain === domain;
+}
+const showAddOptionFor = ref(null);
+const addedOptions = ref([]);
+function onOptionAdded(option) {
+    addedOptions.value.push(option);
+    showAddOptionFor.value = null;
+}
 
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
 function avatarColor(initials) {
@@ -167,7 +183,7 @@ function avatarColor(initials) {
         <!-- Items tab -->
         <div v-if="detailTab === 'items'" class="mp-card mp-card-flush">
             <table class="mp-dt">
-                <thead><tr><th>SKU</th><th>Item</th><th class="ta-r">Qty</th><th>Unit</th><th class="ta-r">Rate</th><th class="ta-r">Total</th><th>Comment</th></tr></thead>
+                <thead><tr><th>SKU</th><th>Item</th><th class="ta-r">Qty</th><th>Unit</th><th class="ta-r">Rate</th><th class="ta-r">Total</th><th>Comment</th><th></th></tr></thead>
                 <tbody>
                     <tr v-for="l in detailLines" :key="l.sku">
                         <td class="mono">{{ l.sku }}</td>
@@ -177,10 +193,30 @@ function avatarColor(initials) {
                         <td class="ta-r mono">{{ fmtMoney(l.rate) }}</td>
                         <td class="ta-r mono">{{ fmtMoney(l.qty * l.rate) }}</td>
                         <td>{{ l.comment }}</td>
+                        <td class="ta-r">
+                            <button
+                                v-if="canAddServiceOption(catalogOf(l.sku)?.domain)"
+                                class="mp-btn mp-btn-sm"
+                                @click="showAddOptionFor = l.sku"
+                            >+ Option</button>
+                            <span v-if="addedOptions.some(o => o.sku === l.sku)" class="mp-dt-optn">
+                                {{ addedOptions.filter(o => o.sku === l.sku).length }} added
+                            </span>
+                        </td>
                     </tr>
                 </tbody>
             </table>
         </div>
+
+        <NewServiceOptionModal
+            v-if="showAddOptionFor"
+            :catalog="catalog"
+            :suppliers="suppliers"
+            :domains="domains"
+            :locked-sku="showAddOptionFor"
+            @close="showAddOptionFor = null"
+            @add="onOptionAdded"
+        />
 
         <!-- Change order tab -->
         <div v-if="detailTab === 'change-order'" class="mp-card mp-card-flush">
@@ -336,6 +372,7 @@ function avatarColor(initials) {
     padding: 10px 14px; text-align: left; white-space: nowrap;
 }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
+.mp-dt-optn { display: inline-block; margin-left: 8px; font-size: 11px; color: #0f766e; font-weight: 600; white-space: nowrap; }
 
 .mp-diff { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mp-diff th { background: #fbfaf6; border-bottom: 1px solid #e8e4db; color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px 14px; text-align: left; }

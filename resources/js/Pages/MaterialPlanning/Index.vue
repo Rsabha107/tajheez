@@ -8,6 +8,11 @@ import RequestsView    from './views/RequestsView.vue';
 import ApprovalsView   from './views/ApprovalsView.vue';
 import NewRequestView  from './views/NewRequestView.vue';
 import CatalogView     from './views/CatalogView.vue';
+import ServiceOptionsView from './views/ServiceOptionsView.vue';
+import SupplierView       from './views/SupplierView.vue';
+import AreaView           from './views/AreaView.vue';
+import SpaceView          from './views/SpaceView.vue';
+import ChangeOrdersView   from './views/ChangeOrdersView.vue';
 import ReportsView     from './views/ReportsView.vue';
 import DetailView      from './views/DetailView.vue';
 import EventsView            from './views/EventsView.vue';
@@ -19,13 +24,20 @@ import RolesPermissionsView  from './views/RolesPermissionsView.vue';
 import UsersView             from './views/UsersView.vue';
 
 const props = defineProps({
-    event:    Object,
-    venues:   Array,
-    domains:  Array,
-    statuses: Object,
-    people:   Array,
-    requests: Array,
-    catalog:  Array,
+    event:          Object,
+    venues:         Array,
+    domains:        Array,
+    statuses:       Object,
+    people:         Array,
+    requests:       Array,
+    catalog:        Array,
+    suppliers:      Array,
+    areas:          Array,
+    spaces:         Array,
+    serviceOptions: Array,
+    changeOrders:   Array,
+    coStates:       Object,
+    permissions:    Object,
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────
@@ -38,7 +50,12 @@ const nav = [
     { id: 'requests',  label: 'Requests',     icon: 'bx bx-list-ul',         badge: '7' },
     { id: 'new',       label: 'New Request',  icon: 'bx bx-plus-circle',     badge: null },
     { id: 'catalog',   label: 'Catalog',      icon: 'bx bx-book-open',       badge: null },
+    { id: 'options',   label: 'Service Options', icon: 'bx bx-purchase-tag', badge: null },
+    { id: 'suppliers', label: 'Suppliers',    icon: 'bx bx-store',           badge: null },
+    { id: 'areas',     label: 'Areas',        icon: 'bx bx-category',        badge: null },
+    { id: 'spaces',    label: 'Spaces',       icon: 'bx bx-map-pin',         badge: null },
     { id: 'approvals', label: 'Approvals',    icon: 'bx bx-check-shield',    badge: '3' },
+    { id: 'changes',   label: 'Change Orders', icon: 'bx bx-git-compare',    badge: '4' },
     { id: 'reports',   label: 'Reports',      icon: 'bx bx-bar-chart-alt-2', badge: null },
 ];
 
@@ -278,6 +295,8 @@ onMounted(async () => {
                     :domains="domains"
                     :venues="venues"
                     :catalog="catalog"
+                    :areas="areas"
+                    :spaces="spaces"
                     :event="activeEvent"
                     :people="people"
                     :prefill-sku="prefilledSku"
@@ -287,8 +306,55 @@ onMounted(async () => {
                     v-else-if="activePage === 'catalog'"
                     :catalog="catalog"
                     :domains="domains"
+                    :suppliers="suppliers"
+                    :service-options="serviceOptions"
                     :event="activeEvent"
                     @go-to="goTo"
+                />
+
+                <ServiceOptionsView
+                    v-else-if="activePage === 'options'"
+                    :catalog="catalog"
+                    :domains="domains"
+                    :suppliers="suppliers"
+                    :service-options="serviceOptions"
+                    :people="people"
+                    :event="activeEvent"
+                />
+
+                <SupplierView
+                    v-else-if="activePage === 'suppliers'"
+                    :suppliers="suppliers"
+                    :people="people"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <AreaView
+                    v-else-if="activePage === 'areas'"
+                    :areas="areas"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <SpaceView
+                    v-else-if="activePage === 'spaces'"
+                    :spaces="spaces"
+                    :areas="areas"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <ChangeOrdersView
+                    v-else-if="activePage === 'changes'"
+                    :change-orders="changeOrders"
+                    :co-states="coStates"
+                    :requests="requests"
+                    :domains="domains"
+                    :venues="venues"
+                    :people="people"
+                    :event="activeEvent"
+                    @open-request="openRequest"
                 />
 
                 <ReportsView
@@ -306,6 +372,9 @@ onMounted(async () => {
                     :venues="venues"
                     :statuses="statuses"
                     :people="people"
+                    :catalog="catalog"
+                    :suppliers="suppliers"
+                    :permissions="permissions"
                     @go-to="goTo"
                 />
 

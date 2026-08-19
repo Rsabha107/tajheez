@@ -5,22 +5,17 @@ const props = defineProps({
     domains:    Array,
     venues:     Array,
     catalog:    Array,
+    areas:      { type: Array, default: () => [] },
+    spaces:     { type: Array, default: () => [] },
     event:      Object,
     people:     Array,
     prefillSku: { type: String, default: null },
 });
 
 // ── Static data ───────────────────────────────────────────────────────────────
-const formSteps = [
-    { label: 'Context',        sub: 'Event · venue · site' },
-    { label: 'Logical space',  sub: 'Where in the venue' },
-    { label: 'Items',          sub: 'Pick from catalog' },
-    { label: 'Routing',        sub: 'Approval & notes' },
-];
 const siteTypes = ['Mixed Zone','Media Centre','VVIP Lounge','Press Tribune','Volunteer Hub','Anti-Doping','Officials Room','Operations Centre','Broadcast Compound','Catering Tent','Medical Clinic','Accreditation'];
 
 // ── Form state ────────────────────────────────────────────────────────────────
-const formStep = ref(0);
 const form = ref({
     title:       'Mixed Zone build-out — Media tier 1',
     eventCode:   'FWC26',
@@ -28,8 +23,8 @@ const form = ref({
     siteType:    'Mixed Zone',
     siteCode:    'MET-MZN-N',
     siteName:    'Mixed Zone — North',
-    lsCategory:  '_3.Media',
-    lsSub:       '_3.3_Mixed_Zone',
+    area:        'MEDIA',
+    space:       '3.3.0',
     lsName:      'Mixed Zone',
     lsCode:      '3.3.0',
     baseRoom:    'No',
@@ -47,12 +42,16 @@ const formLines = ref([
 ]);
 let nextLineId = 5;
 
+const routingCard = ref(null);
+function scrollToRouting() {
+    routingCard.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 onMounted(() => {
     if (!props.prefillSku) return;
     const item = props.catalog.find(c => c.sku === props.prefillSku);
     if (!item) return;
     formLines.value = [{ id: nextLineId++, domain: item.domain, group: item.group, sub: item.sub, sku: item.sku, qty: 1, comment: '' }];
-    formStep.value = 2;
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,6 +64,21 @@ function avatarColor(initials) {
 }
 function personOf(ini) { return (props.people || []).find(p => p.initials === ini) || props.people?.[0] || { name: ini }; }
 
+const spacesForArea = computed(() => props.spaces.filter(s => s.area === form.value.area));
+
+function onAreaChange() {
+    if (!spacesForArea.value.some(s => s.code === form.value.space)) {
+        form.value.space = '';
+    }
+}
+function onSpaceChange() {
+    const sp = props.spaces.find(s => s.code === form.value.space);
+    if (sp) {
+        form.value.lsName = sp.name;
+        form.value.lsCode = sp.code;
+    }
+}
+
 function catalogGroupsFor(domain) {
     return [...new Set(props.catalog.filter(c => c.domain === domain).map(c => c.group))];
 }
@@ -76,6 +90,10 @@ function catalogItemsFor(domain, group, sub) {
 }
 function lineItem(line) {
     return props.catalog.find(c => c.sku === line.sku);
+}
+function isLowStock(line) {
+    const it = lineItem(line);
+    return it && line.qty > it.stock * 0.6;
 }
 function addLine() {
     formLines.value.push({ id: nextLineId++, domain: 'IT', group: '', sub: '', sku: '', qty: 1, comment: '' });
@@ -108,28 +126,13 @@ const formTotal = computed(() =>
             </div>
             <div class="mp-head-actions">
                 <button class="mp-btn">Save draft</button>
+                <button class="mp-btn" @click="scrollToRouting">Preview routing</button>
                 <button class="mp-btn mp-btn-primary">Submit for approval</button>
             </div>
         </div>
 
-        <!-- Step header -->
-        <ol class="mp-steps">
-            <li
-                v-for="(s, i) in formSteps" :key="i"
-                class="mp-step"
-                :class="{ 'mp-step-on': i === formStep, 'mp-step-done': i < formStep }"
-                @click="formStep = i"
-            >
-                <span class="mp-step-n">{{ i < formStep ? '✓' : i + 1 }}</span>
-                <div>
-                    <div class="mp-step-lbl">{{ s.label }}</div>
-                    <div class="mp-step-sub">{{ s.sub }}</div>
-                </div>
-            </li>
-        </ol>
-
-        <!-- Step 0 — Context -->
-        <div v-if="formStep === 0" class="mp-card">
+        <!-- Site context -->
+        <div class="mp-card">
             <div class="mp-card-head">
                 <h3 class="mp-card-title">Site context</h3>
                 <div class="mp-card-sub">All requests are scoped to one site within the active event.</div>
@@ -182,23 +185,25 @@ const formTotal = computed(() =>
             </div>
         </div>
 
-        <!-- Step 1 — Logical space -->
-        <div v-if="formStep === 1" class="mp-card">
+        <!-- Logical space -->
+        <div class="mp-card">
             <div class="mp-card-head">
                 <h3 class="mp-card-title">Logical space</h3>
                 <div class="mp-card-sub">Position within the venue's logical-space taxonomy.</div>
             </div>
             <div class="mp-form-grid">
                 <div class="mp-field">
-                    <label>Category</label>
-                    <select v-model="form.lsCategory">
-                        <option v-for="c in ['_1.Sport','_2.Operations','_3.Media','_4.Commercial','_5.Workforce']" :key="c">{{ c }}</option>
+                    <label>Area</label>
+                    <select v-model="form.area" @change="onAreaChange">
+                        <option value="">— Area —</option>
+                        <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
                     </select>
                 </div>
                 <div class="mp-field">
-                    <label>Sub-category</label>
-                    <select v-model="form.lsSub">
-                        <option v-for="s in ['_3.1_Press_Tribune','_3.2_TV_Compound','_3.3_Mixed_Zone','_3.4_Photo_Position']" :key="s">{{ s }}</option>
+                    <label>Space</label>
+                    <select v-model="form.space" @change="onSpaceChange">
+                        <option value="">— Space —</option>
+                        <option v-for="s in spacesForArea" :key="s.id" :value="s.code">{{ s.name }}</option>
                     </select>
                 </div>
                 <div class="mp-field">
@@ -215,51 +220,79 @@ const formTotal = computed(() =>
                         <option v-for="o in ['No','Yes — shared','Yes — dedicated']" :key="o">{{ o }}</option>
                     </select>
                 </div>
+                <div class="mp-field">
+                    <label>Reference layout</label>
+                    <div class="mp-upload">
+                        <span class="mp-upload-ico">↑</span>
+                        <div>
+                            <div class="mp-upload-name">layout-mixedzone-v3.1.dwg</div>
+                            <div class="mp-upload-meta mono">1.4 MB · uploaded Apr 22</div>
+                        </div>
+                        <button class="mp-upload-x">Replace</button>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Step 2 — Items -->
-        <div v-if="formStep === 2" class="mp-card">
+        <!-- Items -->
+        <div class="mp-card">
             <div class="mp-card-head">
                 <h3 class="mp-card-title">Items</h3>
                 <div class="mp-card-sub">{{ formLines.length }} lines · estimated <b class="mono">{{ fmtMoney(formTotal) }}</b></div>
             </div>
             <div class="mp-ir-head">
                 <div>Domain</div><div>Group</div><div>Sub-group</div><div>Item</div>
-                <div class="ta-r">Qty</div><div class="ta-r">Total</div><div>Comment</div><div></div>
+                <div class="ta-r">Qty</div><div class="ta-r">Line total</div><div>Comment</div><div></div>
             </div>
-            <div v-for="l in formLines" :key="l.id" class="mp-ir">
-                <select :value="l.domain" @change="updateLine(l.id,'domain',$event.target.value)">
-                    <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
-                </select>
-                <select :value="l.group" @change="updateLine(l.id,'group',$event.target.value)">
-                    <option value="">— Group —</option>
-                    <option v-for="g in catalogGroupsFor(l.domain)" :key="g">{{ g }}</option>
-                </select>
-                <select :value="l.sub" @change="updateLine(l.id,'sub',$event.target.value)">
-                    <option value="">— Sub-group —</option>
-                    <option v-for="s in catalogSubsFor(l.domain,l.group)" :key="s">{{ s }}</option>
-                </select>
-                <select :value="l.sku" @change="updateLine(l.id,'sku',$event.target.value)">
-                    <option value="">— Select item —</option>
-                    <option v-for="it in catalogItemsFor(l.domain,l.group,l.sub)" :key="it.sku" :value="it.sku">{{ it.name }}</option>
-                </select>
-                <input type="number" :value="l.qty" @input="updateLine(l.id,'qty',+$event.target.value)" min="0"/>
-                <div class="mono ta-r">{{ lineItem(l) ? fmtMoney(lineItem(l).rate * l.qty) : '—' }}</div>
-                <input :value="l.comment" @input="updateLine(l.id,'comment',$event.target.value)" placeholder="Comment…"/>
-                <button class="mp-ir-x" @click="removeLine(l.id)">×</button>
+            <div class="mp-ir-body">
+                <div v-for="l in formLines" :key="l.id" class="mp-ir">
+                    <select :value="l.domain" @change="updateLine(l.id,'domain',$event.target.value)">
+                        <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
+                    </select>
+                    <select :value="l.group" @change="updateLine(l.id,'group',$event.target.value)">
+                        <option value="">— Group —</option>
+                        <option v-for="g in catalogGroupsFor(l.domain)" :key="g">{{ g }}</option>
+                    </select>
+                    <select :value="l.sub" @change="updateLine(l.id,'sub',$event.target.value)">
+                        <option value="">— Sub-group —</option>
+                        <option v-for="s in catalogSubsFor(l.domain,l.group)" :key="s">{{ s }}</option>
+                    </select>
+                    <div class="mp-ir-item">
+                        <select :value="l.sku" @change="updateLine(l.id,'sku',$event.target.value)">
+                            <option value="">— Select item —</option>
+                            <option v-for="it in catalogItemsFor(l.domain,l.group,l.sub)" :key="it.sku" :value="it.sku">{{ it.name }}</option>
+                        </select>
+                        <div v-if="lineItem(l)" class="mp-ir-sku">
+                            <span class="mono">{{ lineItem(l).sku }}</span>
+                            <span>·</span>
+                            <span>{{ lineItem(l).unit }}</span>
+                            <span>·</span>
+                            <span class="mono">{{ fmtMoney(lineItem(l).rate) }}</span>
+                            <span>·</span>
+                            <span :class="isLowStock(l) ? 'mp-ir-stock-low' : 'mp-ir-stock-ok'">
+                                {{ isLowStock(l) ? 'tight stock' : 'in stock' }} {{ lineItem(l).stock }}
+                            </span>
+                        </div>
+                    </div>
+                    <input type="number" :value="l.qty" @input="updateLine(l.id,'qty',+$event.target.value)" min="0"/>
+                    <div class="mono ta-r mp-ir-total">{{ lineItem(l) ? fmtMoney(lineItem(l).rate * l.qty) : '—' }}</div>
+                    <input :value="l.comment" @input="updateLine(l.id,'comment',$event.target.value)" placeholder="Comment (location, spec, deadline…)"/>
+                    <button class="mp-ir-x" title="Remove line" @click="removeLine(l.id)">×</button>
+                </div>
             </div>
             <div class="mp-ir-foot">
                 <button class="mp-btn" @click="addLine">+ Add item</button>
-                <div class="mp-ir-total">
-                    <span>Estimated total</span>
-                    <span class="mono">{{ fmtMoney(formTotal) }}</span>
+                <button class="mp-ir-foot-btn">Import from CSV</button>
+                <button class="mp-ir-foot-btn">Copy from previous request</button>
+                <div class="mp-ir-foot-total">
+                    <span class="mp-ir-foot-lbl">Estimated total</span>
+                    <span class="mono mp-ir-foot-val">{{ fmtMoney(formTotal) }}</span>
                 </div>
             </div>
         </div>
 
-        <!-- Step 3 — Routing -->
-        <div v-if="formStep === 3" class="mp-card">
+        <!-- Routing -->
+        <div class="mp-card" ref="routingCard">
             <div class="mp-card-head">
                 <h3 class="mp-card-title">Routing & notes</h3>
                 <div class="mp-card-sub">Approval path is determined by value, domain and venue rules.</div>
@@ -292,112 +325,124 @@ const formTotal = computed(() =>
                     <label>Notes for approvers</label>
                     <textarea v-model="form.notes" rows="3"></textarea>
                 </div>
+                <div class="mp-field mp-span-2">
+                    <label>Attach reference docs</label>
+                    <div class="mp-upload mp-upload-empty">
+                        <span class="mp-upload-ico">+</span>
+                        <div class="mp-upload-name">Drop files or browse — site plans, vendor quotes, MoM</div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Step nav -->
-        <div class="mp-step-nav">
-            <button class="mp-btn" :disabled="formStep === 0" @click="formStep = Math.max(0, formStep - 1)">← Back</button>
-            <div class="mp-step-progress">Step {{ formStep + 1 }} of 4</div>
-            <button v-if="formStep < 3" class="mp-btn mp-btn-primary" @click="formStep++">Continue →</button>
-            <button v-else class="mp-btn mp-btn-primary">Submit for approval</button>
+        <div class="mp-page-foot">
+            <button class="mp-btn">Save draft</button>
+            <button class="mp-btn mp-btn-primary">Submit for approval</button>
         </div>
     </div>
 </template>
 
 <style scoped>
-.mp-page { max-width: 100%; }
+.mp-page { max-width: 1320px; margin: 0 auto; }
 .mp-page-head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 20px;
-    background: #fbfaf6; border: 1px solid #e8e4db;
-    border-radius: 8px; padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 24px; margin-bottom: 20px;
 }
-.mp-page-title { font-size: 20px; font-weight: 700; color: #1a1614; margin: 0; }
-.mp-page-sub { font-size: 13px; color: #76706a; margin: 2px 0 0; }
-.mp-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mp-page-title { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: #1a1614; margin: 0; }
+.mp-page-sub { font-size: 13px; color: #76706a; margin: 4px 0 0; }
+.mp-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
 .mp-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 7px 14px; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: 6px;
     border: 1px solid #e8e4db; background: #fff;
-    font-size: 13px; color: #1a1614; cursor: pointer;
-    transition: background .15s;
+    font-size: 12.5px; font-weight: 500; color: #1a1614; cursor: pointer;
+    line-height: 1; transition: background .12s, border-color .12s;
 }
-.mp-btn:hover { background: #f6f5f1; }
-.mp-btn:disabled { opacity: .45; cursor: not-allowed; }
-.mp-btn-primary { background: #0f766e; border-color: #0f766e; color: #fff; }
-.mp-btn-primary:hover { background: #0d9488; }
+.mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
+.mp-btn:disabled { opacity: .4; cursor: not-allowed; }
+.mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
+.mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
 
-.mp-card { background: #fff; border: 1px solid #e8e4db; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
-.mp-card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
-.mp-card-title { font-size: 14px; font-weight: 600; color: #1a1614; margin: 0; }
-.mp-card-sub { font-size: 12px; color: #76706a; flex: 1; }
-
-.mp-steps { display: flex; gap: 0; list-style: none; margin: 0 0 18px; padding: 0; }
-.mp-step {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 16px; flex: 1; cursor: pointer;
-    background: #fff; border: 1px solid #e8e4db;
-    border-right: none; font-size: 13px;
-    transition: background .15s;
+.mp-card {
+    background: #fff; border: 1px solid #e8e4db; border-radius: 10px;
+    box-shadow: 0 1px 0 rgba(20,16,12,.03), 0 1px 2px rgba(20,16,12,.04);
+    padding: 18px; margin-bottom: 16px;
 }
-.mp-step:first-child { border-radius: 8px 0 0 8px; }
-.mp-step:last-child  { border-radius: 0 8px 8px 0; border-right: 1px solid #e8e4db; }
-.mp-step:hover { background: #f6f5f1; }
-.mp-step-on { background: rgba(15,118,110,.1); border-color: #0f766e; color: #0f766e; }
-.mp-step-done { background: #fbfaf6; color: #76706a; }
-.mp-step-n {
-    width: 24px; height: 24px; border-radius: 50%;
-    background: #e8e4db; color: #545a6d;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px; font-weight: 700; flex-shrink: 0;
-}
-.mp-step-on .mp-step-n { background: #0f766e; color: #fff; }
-.mp-step-done .mp-step-n { background: #ccfbf1; color: #0f766e; }
-.mp-step-lbl { font-weight: 600; }
-.mp-step-sub { font-size: 11px; color: #76706a; }
+.mp-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.mp-card-title { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; color: #1a1614; margin: 0; }
+.mp-card-sub { font-size: 12px; color: #76706a; }
 
-.mp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
 .mp-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
-.mp-field label { font-weight: 500; color: #344054; font-size: 12px; }
+.mp-field label { font-weight: 600; color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 .mp-field input, .mp-field select, .mp-field textarea {
-    border: 1px solid #e8e4db; border-radius: 7px;
-    padding: 7px 10px; font-size: 13px; background: #fff; color: #1a1614;
+    border: 1px solid #e8e4db; border-radius: 6px;
+    padding: 8px 10px; font-size: 13px; background: #fff; color: #1a1614;
     outline: none; transition: border-color .15s;
 }
-.mp-field input:focus, .mp-field select:focus, .mp-field textarea:focus { border-color: #0f766e; }
+.mp-field input:focus, .mp-field select:focus, .mp-field textarea:focus {
+    border-color: #0f766e; box-shadow: 0 0 0 3px #0f766e1c;
+}
+.mp-field textarea { resize: vertical; min-height: 64px; font-family: inherit; }
 .mp-span-2 { grid-column: span 2; }
 
+.mp-upload {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; background: #fbfaf6;
+    border: 1px dashed #e8e4db; border-radius: 6px;
+}
+.mp-upload-ico {
+    width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
+    background: #0f766e1c; color: #0f766e;
+    display: flex; align-items: center; justify-content: center; font-weight: 600;
+}
+.mp-upload-name { font-size: 12.5px; font-weight: 500; color: #1a1614; }
+.mp-upload-meta { font-size: 11px; color: #76706a; }
+.mp-upload-x { margin-left: auto; background: transparent; border: 0; color: #0f766e; font-size: 12px; cursor: pointer; }
+.mp-upload-empty .mp-upload-name { color: #76706a; font-weight: 400; }
+
 .mp-ir-head {
-    display: grid; grid-template-columns: 120px 110px 110px 1fr 70px 90px 1fr 28px;
-    gap: 6px; padding: 7px 10px;
-    font-size: 11px; color: #76706a; text-transform: uppercase; letter-spacing: .05em;
-    border-bottom: 1px solid #e8e4db; background: #fbfaf6;
+    display: grid; grid-template-columns: 110px 130px 140px 1.4fr 80px 110px 1fr 32px;
+    gap: 8px; padding: 0 4px 8px;
+    font-size: 10.5px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
+    border-bottom: 1px solid #efece4; margin-bottom: 8px;
 }
 .mp-ir {
-    display: grid; grid-template-columns: 120px 110px 110px 1fr 70px 90px 1fr 28px;
-    gap: 6px; align-items: center; padding: 8px 10px;
-    border-bottom: 1px solid #f3f0ea;
+    display: grid; grid-template-columns: 110px 130px 140px 1.4fr 80px 110px 1fr 32px;
+    gap: 8px; align-items: start; padding: 8px 4px;
+    border-bottom: 1px dashed #efece4;
 }
-.mp-ir select, .mp-ir input { border: 1px solid #e8e4db; border-radius: 6px; padding: 5px 7px; font-size: 12px; width: 100%; background: #fff; }
-.mp-ir-x { border: none; background: none; color: #76706a; cursor: pointer; font-size: 16px; padding: 0; width: 24px; }
-.mp-ir-x:hover { color: #991b1b; }
-.mp-ir-foot { display: flex; align-items: center; gap: 10px; padding: 12px 10px; border-top: 1px solid #e8e4db; }
-.mp-ir-total { margin-left: auto; display: flex; gap: 8px; align-items: center; font-size: 13px; color: #76706a; }
-.mp-ir-total .mono { font-size: 15px; font-weight: 700; color: #1a1614; }
-
-.mp-step-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
-.mp-step-progress { font-size: 13px; color: #76706a; }
+.mp-ir select, .mp-ir > input { border: 1px solid #e8e4db; border-radius: 5px; padding: 6px 8px; font-size: 12.5px; width: 100%; background: #fff; }
+.mp-ir input[type="number"] { text-align: right; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
+.mp-ir-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mp-ir-item select { width: 100%; }
+.mp-ir-sku { display: flex; gap: 6px; font-size: 11px; color: #76706a; flex-wrap: wrap; }
+.mp-ir-stock-low { color: #b45309; font-weight: 500; }
+.mp-ir-stock-ok { color: #166534; font-weight: 500; }
+.mp-ir-total { font-size: 13px; font-weight: 600; padding-top: 6px; }
+.mp-ir-x {
+    width: 28px; height: 28px; border-radius: 5px;
+    border: 1px solid #e8e4db; background: transparent; color: #76706a;
+    cursor: pointer; font-size: 16px; padding: 0;
+}
+.mp-ir-x:hover { background: #fee2e2; color: #991b1b; border-color: #991b1b; }
+.mp-ir-foot { display: flex; align-items: center; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #efece4; flex-wrap: wrap; }
+.mp-ir-foot-btn { background: transparent; border: 0; color: #0f766e; font-size: 12px; cursor: pointer; padding: 0; }
+.mp-ir-foot-btn:hover { text-decoration: underline; }
+.mp-ir-foot-total { margin-left: auto; display: flex; align-items: baseline; gap: 10px; }
+.mp-ir-foot-lbl { font-size: 11px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; }
+.mp-ir-foot-val { font-size: 18px; font-weight: 600; letter-spacing: -.02em; color: #1a1614; }
 
 .mp-route-prev {
-    display: flex; align-items: center; gap: 8px;
-    padding: 12px; background: #fbfaf6; border-radius: 8px; margin-top: 10px; flex-wrap: wrap;
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px; background: #fbfaf6; border-radius: 8px; margin-top: 10px;
+    overflow-x: auto;
 }
-.mp-route-node { display: flex; align-items: center; gap: 8px; }
-.mp-route-name { font-size: 12px; font-weight: 600; color: #1a1614; }
-.mp-route-role { font-size: 10px; color: #76706a; }
-.mp-route-arrow { color: #76706a; font-size: 14px; }
+.mp-route-node { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mp-route-name { font-size: 12.5px; font-weight: 600; color: #1a1614; }
+.mp-route-role { font-size: 11px; color: #76706a; }
+.mp-route-arrow { color: #a39d96; font-size: 14px; flex-shrink: 0; }
 
 .mp-avatar {
     display: inline-flex; align-items: center; justify-content: center;
@@ -405,6 +450,8 @@ const formTotal = computed(() =>
     color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
 }
 .mp-avatar-sm { width: 22px; height: 22px; font-size: 9px; }
+
+.mp-page-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
 .ta-r { text-align: right; }

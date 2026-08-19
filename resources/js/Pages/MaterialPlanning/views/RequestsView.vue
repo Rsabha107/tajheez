@@ -18,6 +18,16 @@ const reqDomain = ref('all');
 const reqVenue  = ref('all');
 const reqSearch = ref('');
 
+const statusFilters = [
+    { key: 'all',       label: 'All' },
+    { key: 'submitted', label: 'Submitted' },
+    { key: 'l1',        label: 'L1 review' },
+    { key: 'l2',        label: 'Category' },
+    { key: 'finance',   label: 'Finance' },
+    { key: 'changed',   label: 'Change req' },
+    { key: 'approved',  label: 'Approved' },
+];
+
 const filteredRequests = computed(() => {
     let rows = props.requests.slice();
     if (props.approvalOnly) rows = rows.filter(r => ['submitted','l1','l2','finance','changed'].includes(r.status));
@@ -68,8 +78,9 @@ function avatarColor(initials) {
                 </p>
             </div>
             <div class="mp-head-actions">
-                <button class="mp-btn">Export CSV</button>
-                <button class="mp-btn mp-btn-primary" @click="emit('go-to', 'new')">+ New request</button>
+                <button class="mp-btn"><i class="bx bx-filter-alt"></i> Saved views</button>
+                <button class="mp-btn"><i class="bx bx-download"></i> Export CSV</button>
+                <button class="mp-btn mp-btn-primary" @click="emit('go-to', 'new')"><i class="bx bx-plus"></i> New request</button>
             </div>
         </div>
 
@@ -89,7 +100,7 @@ function avatarColor(initials) {
         <div class="mp-filterbar">
             <div class="mp-fb-search">
                 <i class="bx bx-search"></i>
-                <input v-model="reqSearch" placeholder="Find request by ID or title…"/>
+                <input v-model="reqSearch" placeholder="Find request by id or title…"/>
             </div>
             <div class="mp-fb-sel">
                 <label>Domain</label>
@@ -105,17 +116,32 @@ function avatarColor(initials) {
                     <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
                 </select>
             </div>
+            <div class="mp-fb-sel">
+                <label>Owner</label>
+                <select>
+                    <option>Anyone</option>
+                    <option v-for="p in people" :key="p.initials">{{ p.name }}</option>
+                </select>
+            </div>
+            <div class="mp-fb-sel">
+                <label>Updated</label>
+                <select>
+                    <option>Any time</option>
+                    <option>Last 24h</option>
+                    <option>Last week</option>
+                </select>
+            </div>
         </div>
 
         <!-- Status chips -->
         <div v-if="!approvalOnly" class="mp-chips">
-            <button v-for="(count, key) in statusCounts" :key="key"
+            <button v-for="f in statusFilters" :key="f.key"
                 class="mp-chip"
-                :class="{ 'mp-chip-active': reqFilter === key }"
-                @click="reqFilter = key"
+                :class="{ 'mp-chip-active': reqFilter === f.key }"
+                @click="reqFilter = f.key"
             >
-                {{ key === 'all' ? 'All' : statuses[key]?.label || key }}
-                <span class="mp-chip-n">{{ count }}</span>
+                {{ f.label }}
+                <span class="mp-chip-n">{{ statusCounts[f.key] }}</span>
             </button>
         </div>
 
@@ -188,25 +214,23 @@ function avatarColor(initials) {
 <style scoped>
 .mp-page { max-width: 100%; }
 .mp-page-head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 20px;
-    background: #fbfaf6; border: 1px solid #e8e4db;
-    border-radius: 8px; padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 24px; margin-bottom: 20px;
 }
-.mp-page-title { font-size: 20px; font-weight: 700; color: #1a1614; margin: 0; }
-.mp-page-sub { font-size: 13px; color: #76706a; margin: 2px 0 0; }
+.mp-page-title { font-size: 24px; font-weight: 600; letter-spacing: -.02em; color: #1a1614; margin: 0; }
+.mp-page-sub { font-size: 13px; color: #76706a; margin: 4px 0 0; }
 .mp-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
 .mp-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 7px 14px; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: 6px;
     border: 1px solid #e8e4db; background: #fff;
-    font-size: 13px; color: #1a1614; cursor: pointer;
-    transition: background .15s;
+    font-size: 12.5px; font-weight: 500; color: #1a1614; cursor: pointer;
+    transition: background .12s, border-color .12s;
 }
-.mp-btn:hover { background: #f6f5f1; }
-.mp-btn-primary { background: #0f766e; border-color: #0f766e; color: #fff; }
-.mp-btn-primary:hover { background: #0d9488; }
+.mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
+.mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
+.mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
 .mp-btn-sm { padding: 4px 10px; font-size: 12px; }
 
 .mp-approvalbar {
@@ -220,25 +244,34 @@ function avatarColor(initials) {
 .mp-ab-warn .mp-ab-n { color: #991b1b; }
 .mp-ab-actions { display: flex; gap: 8px; margin-left: auto; }
 
-.mp-filterbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
-.mp-fb-search {
-    display: flex; align-items: center; gap: 7px;
-    background: #fff; border: 1px solid #e8e4db; border-radius: 7px;
-    padding: 7px 12px; flex: 1; min-width: 220px;
+.mp-filterbar {
+    display: grid; grid-template-columns: 1.6fr repeat(4, 1fr);
+    gap: 8px; margin-bottom: 12px;
 }
-.mp-fb-search input { border: none; outline: none; font-size: 13px; background: transparent; flex: 1; }
-.mp-fb-sel { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #76706a; }
-.mp-fb-sel select { border: 1px solid #e8e4db; border-radius: 6px; padding: 5px 8px; font-size: 12px; background: #fff; }
+.mp-fb-search {
+    display: flex; align-items: center; gap: 8px;
+    background: #fff; border: 1px solid #e8e4db; border-radius: 6px;
+    padding: 6px 10px; color: #76706a;
+}
+.mp-fb-search input { border: none; outline: none; font-size: 12.5px; background: transparent; flex: 1; color: #1a1614; }
+.mp-fb-sel { display: flex; flex-direction: column; gap: 3px; }
+.mp-fb-sel label { font-size: 10.5px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; padding-left: 2px; }
+.mp-fb-sel select {
+    appearance: none;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%2376706a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+    border: 1px solid #e8e4db; border-radius: 6px;
+    padding: 6px 24px 6px 10px; font-size: 12.5px; color: #1a1614; cursor: pointer;
+}
 
 .mp-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .mp-chip {
-    padding: 5px 12px; border-radius: 20px; border: 1px solid #e8e4db;
-    background: #fff; font-size: 12px; color: #545a6d; cursor: pointer;
-    display: flex; align-items: center; gap: 5px;
+    padding: 5px 10px; border-radius: 5px; border: 1px solid #e8e4db;
+    background: #fff; font-size: 12px; color: #3d3833; cursor: pointer;
+    display: flex; align-items: center; gap: 6px; transition: border-color .12s;
 }
-.mp-chip:hover { background: #f6f5f1; }
-.mp-chip-active { background: rgba(15,118,110,.12); border-color: #0f766e; color: #0f766e; font-weight: 600; }
-.mp-chip-n { font-weight: 700; }
+.mp-chip:hover { border-color: #3d3833; }
+.mp-chip-active { background: #1a1614; border-color: #1a1614; color: #fff; }
+.mp-chip-n { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 11px; opacity: .7; }
 
 .mp-card { background: #fff; border: 1px solid #e8e4db; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px; }
 .mp-card-flush { padding: 0; overflow: hidden; }

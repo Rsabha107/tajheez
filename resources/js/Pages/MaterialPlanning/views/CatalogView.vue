@@ -1,12 +1,15 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import axios from 'axios';
 
 const emit = defineEmits(['go-to']);
 
 const props = defineProps({
-    catalog: Array,
-    domains: Array,
-    event:   { type: Object, default: () => ({ code: 'EVT' }) },
+    catalog:        Array,
+    domains:        Array,
+    suppliers:      { type: Array, default: () => [] },
+    serviceOptions: { type: Array, default: () => [] },
+    event:          { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 // Local writable copy so we can optimistically add items
@@ -65,6 +68,32 @@ function stockColor(it) {
     const p = stockPct(it) / 100;
     return p > 0.8 ? '#166534' : p > 0.5 ? '#b45309' : '#991b1b';
 }
+function supplierOf(id) { return props.suppliers.find(s => s.id === id) || props.suppliers[props.suppliers.length - 1] || { name: id }; }
+
+// ── Row expand — service options behind each SKU ─────────────────────────────
+const openSku = ref(null);
+function toggleRow(sku) { openSku.value = openSku.value === sku ? null : sku; }
+function optionsFor(sku) {
+    return props.serviceOptions
+        .filter(o => o.sku === sku)
+        .sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+}
+function defaultOptionFor(sku) {
+    const opts = optionsFor(sku);
+    return opts.find(o => o.isDefault) || opts[0] || null;
+}
+
+const OPT_STATUS = {
+    preferred: { label: 'Preferred', bg: '#dcfce7', fg: '#166534' },
+    active:    { label: 'Active',    bg: '#efece4', fg: '#3d3833' },
+    suspended: { label: 'Suspended', bg: '#fee2e2', fg: '#991b1b' },
+};
+function statusMeta(k) { return OPT_STATUS[k] || OPT_STATUS.active; }
+function variance(cost, rate) {
+    const d = cost - rate;
+    if (!rate || d === 0) return { flat: true, text: 'at catalog' };
+    return { flat: false, pos: d > 0, text: (d > 0 ? '+' : '−') + fmtMoney(Math.abs(d)) };
+}
 
 // ── Add SKU modal ──────────────────────────────────────────────────────────
 const DOMAIN_PREFIX = { IT:'IT', LOG:'LG', PWR:'PW', OVR:'OV', FFE:'FE' };
@@ -97,20 +126,37 @@ function openAddSku() {
 }
 function closeSkuModal() { showAddSku.value = false; }
 
-function addToCatalog() {
-    if (!skuValid.value) return;
-    const item = {
-        sku: sku.value, domain: skuForm.value.domain,
-        group: skuForm.value.group.trim(), sub: skuForm.value.sub.trim(),
-        name: skuForm.value.name.trim(), unit: skuForm.value.unit,
-        rate: +skuForm.value.rate, baseline: +skuForm.value.baseline,
-        stock: +skuForm.value.stock || 0,
-    };
-    catalogItems.value.unshift(item);
-    newRowSku.value = item.sku;
-    setTimeout(() => { newRowSku.value = null; }, 2400);
-    catDomain.value = 'all';
-    closeSkuModal();
+const savingSku = ref(false);
+const skuError = ref(null);
+
+async function addToCatalog() {
+    if (!skuValid.value || savingSku.value) return;
+    savingSku.value = true;
+    skuError.value = null;
+    try {
+        const { data } = await axios.post(route('mp.catalog-items.store'), {
+            sku: sku.value,
+            domain_code: skuForm.value.domain,
+            group: skuForm.value.group.trim(),
+            sub: skuForm.value.sub.trim(),
+            name: skuForm.value.name.trim(),
+            unit: skuForm.value.unit,
+            rate: +skuForm.value.rate,
+            baseline: +skuForm.value.baseline,
+            stock: +skuForm.value.stock || 0,
+        });
+        catalogItems.value.unshift(data);
+        newRowSku.value = data.sku;
+        setTimeout(() => { newRowSku.value = null; }, 2400);
+        catDomain.value = 'all';
+        closeSkuModal();
+    } catch (e) {
+        skuError.value = e.response?.status === 403
+            ? "You don't have permission to add a SKU for this domain."
+            : (e.response?.data?.errors?.sku?.[0] ?? 'Could not save this SKU. Please try again.');
+    } finally {
+        savingSku.value = false;
+    }
 }
 
 function onEsc(e) { if (e.key === 'Escape' && showAddSku.value) closeSkuModal(); }
@@ -125,7 +171,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Item catalog</h1>
-                <p class="mp-page-sub">{{ catalogItems.length }} active SKUs across {{ domains.length }} domains · baseline data from FWC22 Q-final</p>
+                <p class="mp-page-sub">{{ catalogItems.length }} active SKUs across {{ domains.length }} domains · {{ serviceOptions.length }} service options · click a row for its delivery options</p>
             </div>
             <div class="mp-head-actions">
                 <button class="mp-btn mp-btn-icon" title="Refresh catalog" @click="refreshCatalog">
@@ -228,38 +274,88 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 <th class="ta-r">Rate</th>
                                 <th>Unit</th>
                                 <th>Stock vs baseline</th>
+                                <th>Options</th>
                                 <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="it in filteredCatalog" :key="it.sku" class="cat-row" :class="{ 'cat-row-new': it.sku === newRowSku }">
-                                <td>
-                                    <span class="mp-dtag" :style="{ background: domainOf(it.domain).chip, color: domainOf(it.domain).color }">
-                                        <b>{{ it.domain }}</b>
-                                    </span>
-                                </td>
-                                <td class="mono">{{ it.sku }}</td>
-                                <td>
-                                    <div class="cat-name">{{ it.name }}</div>
-                                    <div class="cat-grp">{{ it.group }} · {{ it.sub }}</div>
-                                </td>
-                                <td class="ta-r mono">{{ fmtMoney(it.rate) }}</td>
-                                <td class="mono">{{ it.unit }}</td>
-                                <td>
-                                    <div class="stockbar">
-                                        <div class="stockbar-track">
-                                            <div class="stockbar-fill"
-                                                :style="{ width: stockPct(it) + '%', background: stockColor(it) }"
-                                            />
+                            <template v-for="it in filteredCatalog" :key="it.sku">
+                                <tr
+                                    class="cat-row"
+                                    :class="{ 'cat-row-new': it.sku === newRowSku, 'cat-row-open': openSku === it.sku }"
+                                    @click="toggleRow(it.sku)"
+                                >
+                                    <td>
+                                        <span class="mp-dtag" :style="{ background: domainOf(it.domain).chip, color: domainOf(it.domain).color }">
+                                            <b>{{ it.domain }}</b>
+                                        </span>
+                                    </td>
+                                    <td class="mono">{{ it.sku }}</td>
+                                    <td>
+                                        <div class="cat-name">{{ it.name }}</div>
+                                        <div class="cat-grp">{{ it.group }} · {{ it.sub }}</div>
+                                    </td>
+                                    <td class="ta-r mono">{{ fmtMoney(it.rate) }}</td>
+                                    <td class="mono">{{ it.unit }}</td>
+                                    <td>
+                                        <div class="stockbar">
+                                            <div class="stockbar-track">
+                                                <div class="stockbar-fill"
+                                                    :style="{ width: stockPct(it) + '%', background: stockColor(it) }"
+                                                />
+                                            </div>
+                                            <div class="stockbar-meta mono">
+                                                <span :style="{ color: stockColor(it) }">{{ it.stock }}</span>
+                                                <span>/ {{ it.baseline }}</span>
+                                            </div>
                                         </div>
-                                        <div class="stockbar-meta mono">
-                                            <span :style="{ color: stockColor(it) }">{{ it.stock }}</span>
-                                            <span>/ {{ it.baseline }}</span>
+                                    </td>
+                                    <td class="cat-opts">
+                                        <span class="mono cat-optn">{{ optionsFor(it.sku).length }}</span>
+                                        <span v-if="defaultOptionFor(it.sku)" class="cat-optd">
+                                            {{ supplierOf(defaultOptionFor(it.sku).supplier).name }}{{ optionsFor(it.sku).length > 1 ? ' default' : '' }}
+                                        </span>
+                                    </td>
+                                    <td class="ta-r"><button class="mp-btn mp-btn-sm" @click.stop="emit('go-to', 'new', it)">+ Add</button></td>
+                                </tr>
+                                <tr v-if="openSku === it.sku" class="cat-exp">
+                                    <td colspan="8">
+                                        <div class="cat-exp-inner">
+                                            <div class="cat-exp-h">Service options — how this item can be delivered</div>
+                                            <table class="optlist">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Option</th><th>Supplier</th><th class="ta-r">Unit cost</th><th class="ta-r">vs catalog</th>
+                                                        <th class="ta-r">Lead</th><th>SLA</th><th class="ta-r">Cap / venue</th><th>Contract</th><th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr v-for="o in optionsFor(it.sku)" :key="o.id">
+                                                        <td>
+                                                            <div class="opt-name">{{ o.name }}<span v-if="o.isDefault" class="opt-def">default</span></div>
+                                                            <div class="opt-spec">{{ o.spec }}</div>
+                                                        </td>
+                                                        <td class="opt-sup">{{ supplierOf(o.supplier).name }}</td>
+                                                        <td class="ta-r mono">{{ fmtMoney(o.cost) }}</td>
+                                                        <td class="ta-r">
+                                                            <span v-if="variance(o.cost, it.rate).flat" class="opt-var-flat">at catalog</span>
+                                                            <span v-else class="mono" :class="variance(o.cost, it.rate).pos ? 'diff-pos' : 'diff-neg'">{{ variance(o.cost, it.rate).text }}</span>
+                                                        </td>
+                                                        <td class="ta-r mono">{{ o.lead }} d</td>
+                                                        <td class="opt-sla">{{ o.sla }}</td>
+                                                        <td class="ta-r mono">{{ o.capacity || '—' }}</td>
+                                                        <td class="mono opt-sup-sub">{{ o.contract }}</td>
+                                                        <td><span class="opt-status" :style="{ background: statusMeta(o.status).bg, color: statusMeta(o.status).fg }">{{ statusMeta(o.status).label }}</span></td>
+                                                    </tr>
+                                                    <tr v-if="!optionsFor(it.sku).length">
+                                                        <td colspan="9" class="cat-exp-empty">No service options registered for this SKU yet.</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
                                         </div>
-                                    </div>
-                                </td>
-                                <td><button class="mp-btn mp-btn-sm" @click.stop="emit('go-to', 'new', it)">+ Add</button></td>
-                            </tr>
+                                    </td>
+                                </tr>
+                            </template>
                         </tbody>
                     </table>
                 </div>
@@ -486,7 +582,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <footer class="skum-ft">
                     <div class="skum-ft-l">
                         <span class="mono skum-ft-chip">{{ sku }}</span>
-                        <span v-if="skuValid" class="skum-ft-ok">
+                        <span v-if="skuError" class="skum-ft-warn">
+                            <span class="skum-ft-dot" style="background:#b45309"></span>{{ skuError }}
+                        </span>
+                        <span v-else-if="skuValid" class="skum-ft-ok">
                             <span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add
                         </span>
                         <span v-else class="skum-ft-warn">
@@ -495,7 +594,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeSkuModal">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!skuValid" @click="addToCatalog">Add to catalog</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!skuValid || savingSku" @click="addToCatalog">{{ savingSku ? 'Adding…' : 'Add to catalog' }}</button>
                     </div>
                 </footer>
 
@@ -508,24 +607,22 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 /* ── Page shell ───────────────────────────────────────────────────────────── */
 .mp-page { max-width: 100%; }
 .mp-page-head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 20px;
-    background: #fbfaf6; border: 1px solid #e8e4db;
-    border-radius: 8px; padding: 14px 18px;
+    display: flex; justify-content: space-between; align-items: flex-end;
+    gap: 24px; margin-bottom: 20px;
 }
-.mp-page-title { font-size: 20px; font-weight: 700; color: #1a1614; margin: 0; }
-.mp-page-sub { font-size: 13px; color: #76706a; margin: 2px 0 0; }
+.mp-page-title { font-size: 24px; font-weight: 600; letter-spacing: -.02em; color: #1a1614; margin: 0; }
+.mp-page-sub { font-size: 13px; color: #76706a; margin: 4px 0 0; }
 .mp-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 
 .mp-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 7px 14px; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px; border-radius: 6px;
     border: 1px solid #e8e4db; background: #fff;
-    font-size: 13px; color: #1a1614; cursor: pointer; transition: background .15s;
+    font-size: 12.5px; font-weight: 500; color: #1a1614; cursor: pointer; transition: background .12s, border-color .12s;
 }
-.mp-btn:hover { background: #f6f5f1; }
-.mp-btn-primary { background: #0f766e; border-color: #0f766e; color: #fff; }
-.mp-btn-primary:hover { background: #0d9488; }
+.mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
+.mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
+.mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
 .mp-btn-sm { padding: 4px 10px; font-size: 12px; }
 .mp-btn-icon { padding: 7px 9px; color: #76706a; }
 .mp-btn-icon:hover { color: #1a1614; }
@@ -597,7 +694,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .cat-viewtoggle button.on { background: #1a1614; color: #fff; }
 
 /* ── List table ───────────────────────────────────────────────────────────── */
-.mp-card { background: #fff; border: 1px solid #e8e4db; border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+.mp-card {
+    background: #fff; border: 1px solid #e8e4db; border-radius: 10px; overflow: hidden; margin-bottom: 14px;
+    box-shadow: 0 1px 0 rgba(20,16,12,.03), 0 1px 2px rgba(20,16,12,.04);
+}
 .mp-card-flush { padding: 0; }
 .mp-dt { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mp-dt th {
@@ -606,10 +706,51 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     padding: 10px 14px; text-align: left; white-space: nowrap;
 }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
-.cat-row { cursor: default; }
+.cat-row { cursor: pointer; transition: background .12s; }
+.cat-row:hover { background: #fbfaf6; }
+.cat-row-open { background: #f6f5f1; }
 .cat-row:last-child td { border-bottom: none; }
 .cat-name { font-weight: 500; }
 .cat-grp { font-size: 11px; color: #76706a; margin-top: 2px; }
+
+.cat-opts { display: flex; flex-direction: column; gap: 2px; }
+.cat-optn {
+    display: inline-block; font-size: 11px; font-weight: 700; color: #1a1614;
+    background: #efece4; padding: 1px 7px; border-radius: 10px; width: fit-content;
+}
+.cat-optd { font-size: 11px; color: #76706a; }
+
+/* ── Expanded row — service options for this SKU ─────────────────────────── */
+.cat-exp td { padding: 0; border-bottom: 1px solid #f3f0ea; background: #fbfaf6; }
+.cat-exp-inner { padding: 14px 20px 18px; }
+.cat-exp-h {
+    font-size: 11px; font-weight: 600; color: #76706a; text-transform: uppercase; letter-spacing: .05em;
+    padding: 0 0 8px;
+}
+.cat-exp-empty { padding: 10px 0 4px; font-size: 12.5px; color: #76706a; }
+.cat-exp .optlist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cat-exp .optlist th {
+    text-align: left; font-size: 10.5px; font-weight: 600; color: #a39d96;
+    text-transform: uppercase; letter-spacing: .05em; padding: 4px 14px 6px 0; white-space: nowrap;
+}
+.cat-exp .optlist td { padding: 8px 14px 8px 0; border-top: 1px solid #efece4; vertical-align: middle; }
+.cat-exp .optlist tbody tr:last-child td { padding-bottom: 4px; }
+.opt-name { font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.opt-def {
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    background: #ccfbf1; color: #0f766e; padding: 1px 6px; border-radius: 4px;
+}
+.opt-spec { font-size: 11px; color: #76706a; margin-top: 2px; max-width: 260px; }
+.opt-sup { font-weight: 500; }
+.opt-sup-sub { color: #76706a; }
+.opt-sla { color: #3d3833; }
+.opt-var-flat { font-size: 12px; color: #76706a; }
+.diff-pos { color: #166534; }
+.diff-neg { color: #991b1b; }
+.opt-status {
+    display: inline-flex; align-items: center; padding: 2px 8px;
+    border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
 
 .mp-dtag {
     display: inline-flex; align-items: center; gap: 4px;
