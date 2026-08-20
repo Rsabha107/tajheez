@@ -1,5 +1,7 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
+import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const props = defineProps({
     requests:    Array,
@@ -10,13 +12,57 @@ const props = defineProps({
     people:      Array,
 });
 
-const emit = defineEmits(['open-request', 'go-to']);
+const emit = defineEmits(['open-request', 'go-to', 'requests-deleted']);
 
 // ── Local state ───────────────────────────────────────────────────────────────
 const reqFilter = ref('all');
 const reqDomain = ref('all');
 const reqVenue  = ref('all');
 const reqSearch = ref('');
+
+// ── Selection & bulk delete ──────────────────────────────────────────────────
+const selectedIds = ref(new Set());
+watch(() => props.requests, () => { selectedIds.value = new Set(); });
+
+function toggleRow(id) {
+    const next = new Set(selectedIds.value);
+    next.has(id) ? next.delete(id) : next.add(id);
+    selectedIds.value = next;
+}
+function toggleSelectAll() {
+    selectedIds.value = allSelected.value
+        ? new Set()
+        : new Set(filteredRequests.value.map(r => r.id));
+}
+
+const showDeleteConfirm = ref(false);
+const deleting = ref(false);
+const deleteError = ref(null);
+
+function confirmDeleteSelected() {
+    deleteError.value = null;
+    showDeleteConfirm.value = true;
+}
+
+async function deleteSelected() {
+    const codes = [...selectedIds.value];
+    if (!codes.length) return;
+
+    deleting.value = true;
+    deleteError.value = null;
+    try {
+        await axios.delete(route('mp.requests.bulk-destroy'), { data: { codes } });
+        selectedIds.value = new Set();
+        showDeleteConfirm.value = false;
+        emit('requests-deleted');
+    } catch (e) {
+        deleteError.value = e.response?.status === 403
+            ? "You don't have permission to delete these requests."
+            : 'Could not delete the selected requests.';
+    } finally {
+        deleting.value = false;
+    }
+}
 
 const statusFilters = [
     { key: 'all',       label: 'All' },
@@ -40,6 +86,11 @@ const filteredRequests = computed(() => {
     }
     return rows;
 });
+
+const allSelected = computed(() =>
+    filteredRequests.value.length > 0 && filteredRequests.value.every(r => selectedIds.value.has(r.id))
+);
+const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.value);
 
 const statusCounts = computed(() => {
     const r = props.requests;
@@ -145,18 +196,40 @@ function avatarColor(initials) {
             </button>
         </div>
 
+        <!-- Bulk actions -->
+        <div v-if="selectedIds.size > 0" class="mp-bulkbar">
+            <span class="mp-bulkbar-n">{{ selectedIds.size }} selected</span>
+            <button class="mp-btn mp-btn-sm" @click="selectedIds = new Set()">Clear</button>
+            <button class="mp-btn mp-btn-danger mp-btn-sm" @click="confirmDeleteSelected">
+                <i class="bx bx-trash"></i> Delete
+            </button>
+        </div>
+
+        <ConfirmModal
+            v-if="showDeleteConfirm"
+            :title="`Delete ${selectedIds.size} request${selectedIds.size > 1 ? 's' : ''}?`"
+            message="This cannot be undone."
+            confirm-text="Delete"
+            loading-text="Deleting…"
+            :loading="deleting"
+            danger
+            @cancel="showDeleteConfirm = false"
+            @confirm="deleteSelected"
+        >
+            <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+        </ConfirmModal>
+
         <!-- Table -->
         <div class="mp-card mp-card-flush">
             <table class="mp-dt">
                 <thead>
                     <tr>
-                        <th><input type="checkbox"/></th>
+                        <th><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleSelectAll"/></th>
                         <th>ID</th>
-                        <th>Title</th>
                         <th>Domain</th>
                         <th>Venue · Site</th>
-                        <th class="ta-r">Items</th>
-                        <th class="ta-r">Value</th>
+                        <th class="ta-c">Items</th>
+                        <th class="ta-c">Value</th>
                         <th>Status</th>
                         <th>Priority</th>
                         <th>Owner</th>
@@ -170,9 +243,8 @@ function avatarColor(initials) {
                         class="mp-dt-row"
                         @click="emit('open-request', r.id)"
                     >
-                        <td @click.stop><input type="checkbox"/></td>
+                        <td @click.stop><input type="checkbox" :checked="selectedIds.has(r.id)" @change="toggleRow(r.id)"/></td>
                         <td class="mono mp-dt-id">{{ r.id }}</td>
-                        <td class="mp-dt-title">{{ r.title }}</td>
                         <td>
                             <span class="mp-dtag" :style="{ background: domainOf(r.domain).chip, color: domainOf(r.domain).color }">
                                 <b>{{ r.domain }}</b>
@@ -182,8 +254,8 @@ function avatarColor(initials) {
                             <div class="mp-dt-venue">{{ venueOf(r.venue).name }}</div>
                             <div class="mp-dt-site">{{ r.site }}</div>
                         </td>
-                        <td class="ta-r mono">{{ r.items }}</td>
-                        <td class="ta-r mono">{{ fmtMoney(r.value) }}</td>
+                        <td class="ta-c mono">{{ r.items }}</td>
+                        <td class="ta-c mono">{{ fmtMoney(r.value) }}</td>
                         <td>
                             <span class="mp-pill" :style="{ background: statuses[r.status]?.bg, color: statuses[r.status]?.fg }">
                                 <span class="mp-pill-dot" :style="{ background: statuses[r.status]?.dot }"/>
@@ -231,7 +303,18 @@ function avatarColor(initials) {
 .mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
 .mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
 .mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
+.mp-btn-danger { background: #fff; border-color: #f3c9c9; color: #991b1b; }
+.mp-btn-danger:hover { background: #fdecec; border-color: #991b1b; }
+.mp-btn-danger:disabled { opacity: .6; cursor: default; }
 .mp-btn-sm { padding: 4px 10px; font-size: 12px; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin: 10px 0 0; }
+
+.mp-bulkbar {
+    display: flex; align-items: center; gap: 10px;
+    background: #fbfaf6; border: 1px solid #e8e4db; border-radius: 8px;
+    padding: 8px 14px; margin-bottom: 12px;
+}
+.mp-bulkbar-n { font-size: 12.5px; font-weight: 600; color: #1a1614; margin-right: 4px; }
 
 .mp-approvalbar {
     display: flex; align-items: center; gap: 20px;
@@ -282,11 +365,11 @@ function avatarColor(initials) {
     color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
     padding: 10px 14px; text-align: left; white-space: nowrap;
 }
+.mp-dt th.ta-c { text-align: center; }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
 .mp-dt-row { cursor: pointer; transition: background .12s; }
 .mp-dt-row:hover td { background: #fbfaf6; }
 .mp-dt-id { color: #76706a; font-size: 12px; }
-.mp-dt-title { font-weight: 500; }
 .mp-dt-venue { font-size: 13px; }
 .mp-dt-site { font-size: 11px; color: #76706a; }
 .mp-dt-when { font-size: 12px; color: #76706a; }
@@ -314,4 +397,5 @@ function avatarColor(initials) {
 
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
+.ta-c { text-align: center; }
 </style>

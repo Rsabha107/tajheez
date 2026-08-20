@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
+import DateField from '../components/DateField.vue';
 
 const props = defineProps({
     domains:    Array,
@@ -11,6 +12,7 @@ const props = defineProps({
     event:      Object,
     people:     Array,
     prefillSku: { type: String, default: null },
+    approvalsEnabled: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['go-to', 'request-saved']);
@@ -203,10 +205,13 @@ async function persist(shouldSubmit) {
         if (shouldSubmit) {
             const { data } = await axios.post(route('mp.requests.submit', createdRequestId.value));
             createdRequestCode.value = data.code;
-            emit('request-saved');
         } else {
             lastSavedAt.value = new Date();
         }
+        // Refresh the Requests list in the background either way — a saved draft
+        // should show up there too, not just a submitted request. Only navigate
+        // away on submit; "Save draft" keeps the user on this form.
+        emit('request-saved', shouldSubmit);
     } catch (e) {
         error.value = e.response?.status === 403
             ? "You don't have permission to save this request."
@@ -246,10 +251,6 @@ async function persist(shouldSubmit) {
                 <div class="mp-card-sub">All requests are scoped to one site within the active event.</div>
             </div>
             <div class="mp-form-grid">
-                <div class="mp-field mp-span-2">
-                    <label>Request title <span class="mp-req">*</span></label>
-                    <input v-model="form.title" placeholder="e.g. Mixed Zone build-out — Media tier 1"/>
-                </div>
                 <div class="mp-field">
                     <label>Event <span class="mp-req">*</span></label>
                     <div class="mp-static-field">
@@ -265,11 +266,11 @@ async function persist(shouldSubmit) {
                 </div>
                 <div class="mp-field">
                     <label>Move-in</label>
-                    <input type="date" v-model="form.moveIn"/>
+                    <DateField v-model="form.moveIn"/>
                 </div>
                 <div class="mp-field">
                     <label>Move-out</label>
-                    <input type="date" v-model="form.moveOut"/>
+                    <DateField v-model="form.moveOut"/>
                 </div>
             </div>
         </div>
@@ -396,7 +397,7 @@ async function persist(shouldSubmit) {
                 <div class="mp-card-sub">Approval path is determined by value, domain and venue rules.</div>
             </div>
             <div class="mp-form-grid">
-                <div class="mp-field mp-span-2">
+                <div v-if="approvalsEnabled" class="mp-field mp-span-2">
                     <label>Approval routing</label>
                     <select v-model="form.approver">
                         <option v-for="o in ['Auto-route (multi-step)','Override — single approver','Override — finance-only']" :key="o">{{ o }}</option>

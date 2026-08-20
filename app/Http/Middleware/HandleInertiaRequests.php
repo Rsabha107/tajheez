@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\Setting;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -29,6 +30,10 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        if (! $request->session()->has('approvals_enabled')) {
+            $request->session()->put('approvals_enabled', Setting::get('approvals_enabled', '1') === '1');
+        }
+
         return [
             ...parent::share($request),
             'auth' => [
@@ -37,6 +42,9 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn() => $request->session()->get('success'),
                 'error'   => fn() => $request->session()->get('error'),
+            ],
+            'settings' => [
+                'approvalsEnabled' => fn() => $request->session()->get('approvals_enabled'),
             ],
         ];
     }

@@ -11,6 +11,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\RolesPermissionController;
+use App\Http\Controllers\SettingController;
 use App\Http\Controllers\MaterialPlanningController;
 use App\Http\Controllers\MaterialPlanning\AreaController;
 use App\Http\Controllers\MaterialPlanning\CatalogItemController;
@@ -150,6 +151,8 @@ Route::middleware('auth')->group(function () {
 
     Route::get('/material-planning', [MaterialPlanningController::class, 'index'])->name('material-planning.index');
 
+    Route::put('/api/settings/approvals-enabled', [SettingController::class, 'updateApprovalsEnabled'])->name('settings.approvals-enabled.update');
+
     Route::controller(CatalogItemController::class)->group(function () {
         Route::post('/api/mp/catalog-items', 'store')->name('mp.catalog-items.store');
         Route::put('/api/mp/catalog-items/{catalogItem}', 'update')->name('mp.catalog-items.update');
@@ -210,6 +213,7 @@ Route::middleware('auth')->group(function () {
         Route::put('/api/mp/requests/{materialRequest}', 'update')->name('mp.requests.update');
         Route::post('/api/mp/requests/{materialRequest}/submit', 'submit')->name('mp.requests.submit');
         Route::delete('/api/mp/requests/{materialRequest}', 'destroy')->name('mp.requests.destroy');
+        Route::delete('/api/mp/requests', 'bulkDestroy')->name('mp.requests.bulk-destroy');
     });
 
     Route::controller(RequestLineController::class)->group(function () {

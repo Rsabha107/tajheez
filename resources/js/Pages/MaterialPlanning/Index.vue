@@ -25,6 +25,7 @@ import PermissionsView       from './views/PermissionsView.vue';
 import RolesView             from './views/RolesView.vue';
 import RolesPermissionsView  from './views/RolesPermissionsView.vue';
 import UsersView             from './views/UsersView.vue';
+import SettingsView          from './views/SettingsView.vue';
 
 const props = defineProps({
     event:          Object,
@@ -61,6 +62,7 @@ const nav = [
     { id: 'approvals', label: 'Approvals',    icon: 'bx bx-check-shield',    badge: '3' },
     { id: 'changes',   label: 'Change Orders', icon: 'bx bx-git-compare',    badge: '4' },
     { id: 'reports',   label: 'Reports',      icon: 'bx bx-bar-chart-alt-2', badge: null },
+    { id: 'settings',  label: 'Settings',     icon: 'bx bx-cog',             badge: null },
 ];
 
 const appSetupsNav = [
@@ -110,10 +112,17 @@ function goTo(id, payload = null) {
     prefilledSku.value = (id === 'new' && payload?.sku) ? payload.sku : null;
 }
 
-// A request was created/submitted via NewRequestView — its accessors (items/qty/value/domain)
-// are computed server-side, so refresh `requests` from the server rather than faking it client-side.
-function onRequestSaved() {
-    router.reload({ only: ['requests', 'people'], onFinish: () => goTo('requests') });
+// A request was created/submitted/draft-saved via NewRequestView — its accessors
+// (items/qty/value/domain) are computed server-side, so refresh `requests` from the
+// server rather than faking it client-side. Only navigate to the Requests list when
+// the request was actually submitted — a draft save should keep the user on the form.
+function onRequestSaved(navigate = true) {
+    router.reload({ only: ['requests', 'people'], onFinish: () => { if (navigate) goTo('requests'); } });
+}
+
+// Requests were bulk-deleted from RequestsView/ApprovalsView — refresh in place.
+function refreshRequests() {
+    router.reload({ only: ['requests'] });
 }
 
 // ── User menu ──────────────────────────────────────────────────────────────
@@ -161,6 +170,34 @@ const currentPageLabel = computed(() =>
     || ''
 );
 
+// ── URL sync — keeps the active view (and open request) across a page refresh ──
+const validPages = new Set([
+    ...nav.map(n => n.id),
+    ...appSetupsNav.map(n => n.id),
+    'events', 'venues', 'functional-areas',
+    'permissions', 'roles', 'roles-permissions', 'users',
+]);
+
+watch([activePage, detailId], () => {
+    const hash = '#' + (activePage.value === 'detail' && detailId.value
+        ? `detail/${encodeURIComponent(detailId.value)}`
+        : activePage.value);
+    if (window.location.hash !== hash) {
+        history.replaceState(null, '', hash);
+    }
+});
+
+function restoreFromHash() {
+    const raw = window.location.hash.replace(/^#/, '');
+    if (!raw) return;
+    if (raw.startsWith('detail/')) {
+        const id = decodeURIComponent(raw.slice('detail/'.length));
+        if (id) openRequest(id);
+        return;
+    }
+    if (validPages.has(raw)) activePage.value = raw;
+}
+
 // ── Event selector ──────────────────────────────────────────────────────────
 const STORAGE_KEY = 'mp_active_event_id';
 const availableEvents = ref([]);
@@ -185,6 +222,24 @@ const activeEvent = computed(() => {
     return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null };
 });
 
+// ── Workspace settings ────────────────────────────────────────────────────────
+// Backed by the `settings` DB table and cached in the PHP session (shared into
+// every Inertia response via HandleInertiaRequests) — not client-side storage.
+const approvalsEnabled = ref(page.props.settings?.approvalsEnabled ?? true);
+const approvalsEnabledSaving = ref(false);
+async function setApprovalsEnabled(enabled) {
+    const previous = approvalsEnabled.value;
+    approvalsEnabled.value = enabled;
+    approvalsEnabledSaving.value = true;
+    try {
+        await axios.put(route('settings.approvals-enabled.update'), { enabled });
+    } catch (e) {
+        approvalsEnabled.value = previous;
+    } finally {
+        approvalsEnabledSaving.value = false;
+    }
+}
+
 function selectEvent(id) {
     selectedEventId.value = id;
     userEvtOpen.value = false;
@@ -196,6 +251,8 @@ const vClickOutside = {
 };
 
 onMounted(async () => {
+    restoreFromHash();
+
     try {
         const { data } = await axios.get(route('events.data'), { params: { limit: 100, offset: 0 } });
         availableEvents.value = data.rows ?? data ?? [];
@@ -434,6 +491,7 @@ onMounted(async () => {
                     :approval-only="false"
                     @open-request="openRequest"
                     @go-to="goTo"
+                    @requests-deleted="refreshRequests"
                 />
 
                 <ApprovalsView
@@ -445,6 +503,7 @@ onMounted(async () => {
                     :people="people"
                     @open-request="openRequest"
                     @go-to="goTo"
+                    @requests-deleted="refreshRequests"
                 />
 
                 <NewRequestView
@@ -458,6 +517,7 @@ onMounted(async () => {
                     :event="activeEvent"
                     :people="people"
                     :prefill-sku="prefilledSku"
+                    :approvals-enabled="approvalsEnabled"
                     @go-to="goTo"
                     @request-saved="onRequestSaved"
                 />
@@ -552,6 +612,14 @@ onMounted(async () => {
                     :domains="domains"
                     :requests="requests"
                     :event="event"
+                />
+
+                <SettingsView
+                    v-else-if="activePage === 'settings'"
+                    :event="activeEvent"
+                    :approvals-enabled="approvalsEnabled"
+                    :approvals-enabled-saving="approvalsEnabledSaving"
+                    @update:approvals-enabled="setApprovalsEnabled"
                 />
 
                 <DetailView

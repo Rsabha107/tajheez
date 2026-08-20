@@ -41,7 +41,7 @@ class MaterialRequestController extends Controller
         Gate::authorize('create', MaterialRequest::class);
 
         $data = $request->validate([
-            'title' => ['required', 'string', 'max:200'],
+            'title' => ['nullable', 'string', 'max:200'],
             'event_id' => ['required', 'exists:events,id'],
             'venue_id' => ['required', 'exists:venues,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
@@ -80,7 +80,7 @@ class MaterialRequestController extends Controller
         Gate::authorize('update', $materialRequest);
 
         $data = $request->validate([
-            'title' => ['sometimes', 'string', 'max:200'],
+            'title' => ['sometimes', 'nullable', 'string', 'max:200'],
             'event_id' => ['sometimes', 'exists:events,id'],
             'venue_id' => ['sometimes', 'exists:venues,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
@@ -141,6 +141,28 @@ class MaterialRequestController extends Controller
         $materialRequest->delete();
 
         return response()->json(['message' => 'Request deleted successfully.']);
+    }
+
+    public function bulkDestroy(Request $request)
+    {
+        $data = $request->validate([
+            'codes' => ['required', 'array', 'min:1'],
+            'codes.*' => ['string'],
+        ]);
+
+        $requests = MaterialRequest::whereIn('code', $data['codes'])->get();
+
+        foreach ($requests as $materialRequest) {
+            Gate::authorize('delete', $materialRequest);
+
+            if ($materialRequest->layout_file_path) {
+                Storage::disk('public')->delete($materialRequest->layout_file_path);
+            }
+
+            $materialRequest->delete();
+        }
+
+        return response()->json(['deleted' => $requests->pluck('code')]);
     }
 
     private function present(MaterialRequest $materialRequest): array

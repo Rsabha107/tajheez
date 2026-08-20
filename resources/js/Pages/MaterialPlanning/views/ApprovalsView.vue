@@ -11,7 +11,7 @@ const props = defineProps({
     people:   Array,
 });
 
-const emit = defineEmits(['open-request', 'go-to']);
+const emit = defineEmits(['open-request', 'go-to', 'requests-deleted']);
 </script>
 
 <template>
@@ -24,5 +24,6 @@ const emit = defineEmits(['open-request', 'go-to']);
         :approval-only="true"
         @open-request="emit('open-request', $event)"
         @go-to="emit('go-to', $event)"
+        @requests-deleted="emit('requests-deleted')"
     />
 </template>
