@@ -26,7 +26,7 @@ class NewPasswordController extends Controller
     public function create(Request $request): Response
     {
         Log::debug('PasswordResetLinkController@store called with email: ' . $request->email);
-        return Inertia::render('MyAuth/ResetPassword', [
+        return Inertia::render('Auth/ResetPassword', [
             'email' => $request->email,
             'token' => $request->route('token'),
         ]);

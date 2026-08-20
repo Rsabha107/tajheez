@@ -1,100 +1,152 @@
 <script setup>
-import Checkbox from '@/Components/Checkbox.vue';
-import GuestLayout from '@/Layouts/GuestLayout.vue';
-import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref } from "vue";
+import { Head, Link, useForm } from "@inertiajs/vue3";
+import AuthShell from "@/Components/AuthShell.vue";
+import PasswordInput from "@/Components/PasswordInput.vue";
 
-defineProps({
-    canResetPassword: {
-        type: Boolean,
-    },
-    status: {
-        type: String,
-    },
+const validated = ref(false);
+
+const props = defineProps({
+  canResetPassword: {
+    type: Boolean,
+  },
+  status: {
+    type: String,
+  },
+  remember: {
+    type: Boolean,
+  },
 });
+
+const canReset = ref(true);
+const remember = ref(false);
 
 const form = useForm({
-    email: '',
-    password: '',
-    remember: false,
+  email: "",
+  password: "",
+  remember: props.remember || false,
 });
 
-const submit = () => {
-    form.post(route('login'), {
-        onFinish: () => form.reset('password'),
-    });
-};
+function submit(e) {
+  const htmlForm = e.currentTarget;
+
+  if (!htmlForm.checkValidity()) {
+    e.preventDefault();
+    e.stopPropagation();
+    validated.value = true;
+    return;
+  }
+
+  validated.value = true;
+
+  form.post(route("login"), {
+    onFinish: () => form.reset("password"),
+  });
+}
 </script>
 
 <template>
-    <GuestLayout>
-        <Head title="Log in" />
+  <Head title="Sign in" />
+  <AuthShell title="Welcome back" subtitle="Sign in to your Tajheez account">
+    <form
+      @submit.prevent="submit"
+      class="needs-validation"
+      :class="{ 'was-validated': validated }"
+      novalidate
+    >
+      <div v-if="status" class="alert alert-success" role="alert">
+        {{ status }}
+      </div>
 
-        <div v-if="status" class="mb-4 text-sm font-medium text-green-600">
-            {{ status }}
-        </div>
+      <div v-if="$page.props.flash?.error" class="alert alert-danger" role="alert">
+        {{ $page.props.flash.error }}
+      </div>
 
-        <form @submit.prevent="submit">
-            <div>
-                <InputLabel for="email" value="Email" />
+      <div v-if="form.errors.email" class="alert alert-danger" role="alert">
+        {{ form.errors.email }}
+      </div>
 
-                <TextInput
-                    id="email"
-                    type="email"
-                    class="mt-1 block w-full"
-                    v-model="form.email"
-                    required
-                    autofocus
-                    autocomplete="username"
-                />
+      <div class="mb-3">
+        <label class="form-label" for="email">Email</label>
+        <input
+          class="form-control"
+          id="email"
+          placeholder="Enter email"
+          type="email"
+          v-model="form.email"
+          required
+          :class="{ 'is-invalid': form.errors.email }"
+        />
+        <div class="invalid-feedback" v-if="form.errors.email"></div>
+        <div class="invalid-feedback" v-else>Please enter a valid email.</div>
+      </div>
 
-                <InputError class="mt-2" :message="form.errors.email" />
-            </div>
+      <PasswordInput
+        v-model="form.password"
+        :error="form.errors.password"
+        label="Password"
+        placeholder="Enter password"
+        id="password"
+      />
 
-            <div class="mt-4">
-                <InputLabel for="password" value="Password" />
+      <div class="form-check" v-if="remember">
+        <input
+          class="form-check-input"
+          id="remember-check"
+          type="checkbox"
+          v-model="form.remember"
+        />
+        <label class="form-check-label" for="remember-check">Remember me</label>
+      </div>
 
-                <TextInput
-                    id="password"
-                    type="password"
-                    class="mt-1 block w-full"
-                    v-model="form.password"
-                    required
-                    autocomplete="current-password"
-                />
+      <div class="mt-3 d-grid">
+        <button type="submit" class="btn btn-primary" :disabled="form.processing">
+          {{ form.processing ? "Signing in..." : "Login" }}
+        </button>
+      </div>
 
-                <InputError class="mt-2" :message="form.errors.password" />
-            </div>
+      <div class="as-divider"><span>or</span></div>
 
-            <div class="mt-4 block">
-                <label class="flex items-center">
-                    <Checkbox name="remember" v-model:checked="form.remember" />
-                    <span class="ms-2 text-sm text-gray-600"
-                        >Remember me</span
-                    >
-                </label>
-            </div>
+      <a href="/auth/microsoft/redirect" class="as-sso-btn" title="Sign in with Microsoft">
+        <i class="mdi mdi-microsoft-windows"></i> Sign in with Microsoft
+      </a>
 
-            <div class="mt-4 flex items-center justify-end">
-                <Link
-                    v-if="canResetPassword"
-                    :href="route('password.request')"
-                    class="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                >
-                    Forgot your password?
-                </Link>
+      <div class="mt-3 text-center">
+        <Link v-if="canReset" class="as-muted-link" :href="route('myforgotpassword')">
+          Forgot your password?
+        </Link>
+      </div>
+    </form>
 
-                <PrimaryButton
-                    class="ms-4"
-                    :class="{ 'opacity-25': form.processing }"
-                    :disabled="form.processing"
-                >
-                    Log in
-                </PrimaryButton>
-            </div>
-        </form>
-    </GuestLayout>
+    <template #footer>
+      <p class="mb-0">
+        Don't have an account?
+        <Link :href="route('myregister')">Sign up</Link>
+      </p>
+    </template>
+  </AuthShell>
 </template>
+
+<style scoped>
+.as-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 18px 0 14px;
+  font-size: 11.5px; color: #a39d96; text-transform: uppercase; letter-spacing: .05em;
+}
+.as-divider::before, .as-divider::after {
+  content: ''; flex: 1; height: 1px; background: #e8e4db;
+}
+
+.as-sso-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 9px 14px;
+  border: 1px solid #e8e4db; border-radius: 8px;
+  background: #fff; color: #1a1614;
+  font-size: 13.5px; font-weight: 600; text-decoration: none;
+  transition: background .15s;
+}
+.as-sso-btn:hover { background: #fbfaf6; color: #1a1614; }
+
+.as-muted-link { font-size: 12.5px; color: #76706a; text-decoration: none; }
+.as-muted-link:hover { color: #0f766e; text-decoration: underline; }
+</style>

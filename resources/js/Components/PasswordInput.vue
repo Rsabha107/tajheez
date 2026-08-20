@@ -61,14 +61,14 @@ function toggle() {
   right: 12px;
   transform: translateY(-50%);
   cursor: pointer;
-  color: #6c757d;
+  color: #76706a;
   z-index: 10;
   display: flex;
   align-items: center;
 }
 
 .password-toggle:hover {
-  color: #000;
+  color: #0f766e;
 }
 
 /* prevent overlap */

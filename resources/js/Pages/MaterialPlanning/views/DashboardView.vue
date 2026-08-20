@@ -1,4 +1,7 @@
 <script setup>
+import { computed } from 'vue';
+import { usePage } from '@inertiajs/vue3';
+
 const props = defineProps({
     event:    Object,
     domains:  Array,
@@ -47,6 +50,16 @@ const recentActivity = [
     { who: 'SO', verb: 'commented on',    what: 'MR-26-04183', note: 'awaiting venue confirmation',   at: '4h'  },
 ];
 
+// ── Greeting — real time of day + the logged-in user's first name ────────────
+const page = usePage();
+const firstName = computed(() => (page.props.auth?.user?.name || '').trim().split(/\s+/)[0] || 'there');
+const greeting = computed(() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
@@ -76,7 +89,7 @@ function sparkArea(data, w, h) {
     <div class="mp-page">
         <div class="mp-page-head">
             <div>
-                <h1 class="mp-page-title">Good morning, Amal</h1>
+                <h1 class="mp-page-title">{{ greeting }}, {{ firstName }}</h1>
                 <p class="mp-page-sub">{{ event.name }} · T-{{ event.daysOut }} days · 6 venues · 948 sites planned</p>
             </div>
             <div class="mp-head-actions">

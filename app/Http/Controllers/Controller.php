@@ -11,7 +11,7 @@ abstract class Controller
     //
     public function Login(Request $request): Response
     {
-        return Inertia::render('MyAuth/Login');
+        return Inertia::render('Auth/Login');
     }
 
 }

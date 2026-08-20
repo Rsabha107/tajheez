@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
-import { Head, router } from '@inertiajs/vue3';
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import { Head, router, usePage } from '@inertiajs/vue3';
 import axios from 'axios';
 
 import DashboardView   from './views/DashboardView.vue';
@@ -116,6 +116,40 @@ function onRequestSaved() {
     router.reload({ only: ['requests', 'people'], onFinish: () => goTo('requests') });
 }
 
+// ── User menu ──────────────────────────────────────────────────────────────
+const page = usePage();
+const authUser = computed(() => page.props.auth?.user ?? { name: 'Amal Rashid', email: '' });
+function initialsOf(name) {
+    if (!name) return '—';
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
+}
+
+const userMenuOpen = ref(false);
+const userMenuRef = ref(null);
+const availability = ref('active');
+
+function closeUserMenu(e) {
+    if (userMenuOpen.value && userMenuRef.value && !userMenuRef.value.contains(e.target)) {
+        userMenuOpen.value = false;
+    }
+}
+onMounted(() => document.addEventListener('click', closeUserMenu));
+onBeforeUnmount(() => document.removeEventListener('click', closeUserMenu));
+
+// The "Switch" button in the user menu's venue card drives the active-event
+// selection (same availableEvents/selectEvent used by the rest of the page).
+const userEvtOpen = ref(false);
+watch(userMenuOpen, open => { if (!open) userEvtOpen.value = false; });
+
+function goToFromMenu(id) {
+    userMenuOpen.value = false;
+    goTo(id);
+}
+function signOut() {
+    router.post(route('logout'));
+}
+
 const sectionLabels = {
     events: 'Events', venues: 'Venues', 'functional-areas': 'Functional Areas',
     permissions: 'Permissions', roles: 'Roles', 'roles-permissions': 'Roles & Permissions', users: 'Users',
@@ -151,8 +185,10 @@ const activeEvent = computed(() => {
     return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null };
 });
 
-const evtDropdownOpen = ref(false);
-function selectEvent(id) { selectedEventId.value = id; evtDropdownOpen.value = false; }
+function selectEvent(id) {
+    selectedEventId.value = id;
+    userEvtOpen.value = false;
+}
 
 const vClickOutside = {
     mounted(el, b)   { el._co = e => { if (!el.contains(e.target)) b.value(e); }; document.addEventListener('click', el._co); },
@@ -268,37 +304,6 @@ onMounted(async () => {
                     </button>
                 </div>
             </div>
-
-            <div class="mp-foot" v-click-outside="() => evtDropdownOpen = false">
-                <div class="mp-foot-lbl">Active event</div>
-
-                <!-- Event card — click to open selector -->
-                <div class="mp-foot-evt mp-foot-evt-btn" @click="evtDropdownOpen = !evtDropdownOpen">
-                    <div class="mp-foot-evtcode">{{ activeEvent.code }}</div>
-                    <div style="flex:1; min-width:0;">
-                        <div class="mp-foot-evtname">
-                            {{ activeEvent.name }}
-                            <svg :style="{ transform: evtDropdownOpen ? 'rotate(180deg)' : '' }" style="transition:transform .18s; flex-shrink:0; margin-left:3px; vertical-align:middle" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-                        </div>
-                        <div v-if="activeEvent.window" class="mp-foot-evtwin">{{ activeEvent.window }}</div>
-                    </div>
-                </div>
-
-                <!-- Dropdown — floats above the card -->
-                <div v-if="evtDropdownOpen" class="mp-evt-menu">
-                    <button
-                        v-for="e in availableEvents" :key="e.id"
-                        class="mp-evt-opt"
-                        :class="{ 'mp-evt-opt-active': e.id === selectedEventId }"
-                        @click="selectEvent(e.id)"
-                    >{{ e.name }}</button>
-                </div>
-
-                <div v-if="activeEvent.daysOut" class="mp-foot-count">
-                    <span>T-{{ activeEvent.daysOut }} days</span>
-                    <span class="mp-foot-bar"><span style="width:86%"/></span>
-                </div>
-            </div>
         </aside>
 
         <!-- ── Right column: topbar + main ───────────────────── -->
@@ -311,24 +316,96 @@ onMounted(async () => {
                     <span class="tb-sep">/</span>
                     <span class="tb-here">{{ currentPageLabel }}</span>
                 </div>
-                <div class="tb-search">
-                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5" stroke-linecap="round"/></svg>
-                    <input placeholder="Search requests, items, sites… (⌘K)" />
-                    <span class="tb-kbd">⌘K</span>
+                <div class="tb-event-display">
+                    <i class="bx bx-calendar-event"></i>
+                    <span class="tb-event-name">{{ activeEvent.name }}</span>
+                    <span v-if="activeEvent.window" class="tb-event-window">{{ activeEvent.window }}</span>
                 </div>
                 <div class="tb-right">
                     <button class="tb-icobtn" title="Notifications">
                         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0a3 3 0 11-6 0"/></svg>
                         <span class="tb-icobtn-dot"></span>
                     </button>
-                    <button class="tb-user">
-                        <span class="tb-avatar">AR</span>
-                        <div class="tb-user-meta">
-                            <div class="tb-user-name">Amal Rashid</div>
-                            <div class="tb-user-role">Venue Planner · MET</div>
+                    <div class="tb-user-wrap" ref="userMenuRef">
+                        <button class="tb-user" @click="userMenuOpen = !userMenuOpen">
+                            <span class="tb-avatar">{{ initialsOf(authUser.name) }}</span>
+                            <div class="tb-user-meta">
+                                <div class="tb-user-name">{{ authUser.name }}</div>
+                                <div class="tb-user-role">Venue Planner · MET</div>
+                            </div>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="tb-user-chev" :class="{ 'tb-user-chev-open': userMenuOpen }"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+
+                        <div v-if="userMenuOpen" class="tb-user-menu">
+                            <div class="tbm-profile">
+                                <span class="tbm-avatar">{{ initialsOf(authUser.name) }}</span>
+                                <div class="tbm-profile-meta">
+                                    <div class="tbm-name">{{ authUser.name }}</div>
+                                    <div class="tbm-role">Venue Planner</div>
+                                    <div class="tbm-email"><span class="tbm-dot"/>{{ authUser.email }}</div>
+                                </div>
+                            </div>
+
+                            <div class="tbm-venue">
+                                <div class="tbm-venue-top">
+                                    <span class="tbm-badge">{{ activeEvent.code }}</span>
+                                    <div class="tbm-switch-wrap" v-click-outside="() => userEvtOpen = false">
+                                        <button class="tbm-switch" type="button" @click="userEvtOpen = !userEvtOpen">Switch</button>
+                                        <div v-if="userEvtOpen" class="tbm-evt-menu">
+                                            <button
+                                                v-for="e in availableEvents" :key="e.id"
+                                                class="mp-evt-opt"
+                                                :class="{ 'mp-evt-opt-active': e.id === selectedEventId }"
+                                                @click="selectEvent(e.id)"
+                                            >{{ e.name }}</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tbm-venue-name">{{ activeEvent.name }}</div>
+                                <div class="tbm-venue-sub">{{ activeEvent.window || 'Active event' }}</div>
+                            </div>
+
+                            <div class="tbm-section">
+                                <div class="tbm-section-lbl">Availability</div>
+                                <div class="tbm-avail">
+                                    <button class="tbm-avail-btn" :class="{ 'tbm-avail-on': availability === 'active' }" @click="availability = 'active'">
+                                        <span class="tbm-avail-dot" style="background:#16a34a"/>Active
+                                    </button>
+                                    <button class="tbm-avail-btn" :class="{ 'tbm-avail-on': availability === 'heads-down' }" @click="availability = 'heads-down'">
+                                        <span class="tbm-avail-dot" style="background:#b45309"/>Heads-down
+                                    </button>
+                                    <button class="tbm-avail-btn" :class="{ 'tbm-avail-on': availability === 'out-of-office' }" @click="availability = 'out-of-office'">
+                                        <span class="tbm-avail-dot" style="background:#9ca3af"/>Out of office
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="tbm-list">
+                                <button class="tbm-item" @click="goToFromMenu('requests')">
+                                    <span>My requests</span><span class="tbm-count">14</span>
+                                </button>
+                                <button class="tbm-item" @click="goToFromMenu('approvals')">
+                                    <span>Awaiting my approval</span><span class="tbm-count tbm-count-warn">3</span>
+                                </button>
+                                <button class="tbm-item">
+                                    <span>Watching</span><span class="tbm-count">11</span>
+                                </button>
+                                <button class="tbm-item">
+                                    <span>Downloads &amp; exports</span>
+                                </button>
+                            </div>
+
+                            <div class="tbm-list">
+                                <button class="tbm-item"><span>Preferences</span></button>
+                                <button class="tbm-item">
+                                    <span>Keyboard shortcuts</span><span class="tbm-kbd">⌘ /</span>
+                                </button>
+                                <button class="tbm-item"><span>Help &amp; docs</span></button>
+                            </div>
+
+                            <button class="tbm-signout" @click="signOut">Sign out <span>→</span></button>
                         </div>
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="tb-user-chev"><path d="M6 9l6 6 6-6"/></svg>
-                    </button>
+                    </div>
                 </div>
             </header>
 
@@ -595,25 +672,6 @@ onMounted(async () => {
 }
 .mp-settings-item:hover { background: #f6f5f1; color: #1a1614; }
 .mp-settings-active { background: rgba(15,118,110,.12) !important; color: #0f766e !important; font-weight: 600; }
-.mp-foot {
-    padding: 14px 14px 16px;
-    border-top: 1px solid #e8e4db;
-    font-size: 11px; color: #76706a;
-}
-.mp-foot-lbl { text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
-.mp-foot { position: relative; }
-.mp-foot-evt-btn {
-    cursor: pointer; border-radius: 6px;
-    transition: background .12s;
-    margin: 0 -6px; padding: 4px 6px;
-}
-.mp-foot-evt-btn:hover { background: #f3f0e8; }
-.mp-evt-menu {
-    position: absolute; bottom: calc(100% + 4px); left: 0; right: 0;
-    background: #fff; border: 1px solid #e8e4db; border-radius: 8px;
-    box-shadow: 0 4px 18px rgba(0,0,0,.10);
-    padding: 4px; z-index: 200; max-height: 220px; overflow-y: auto;
-}
 .mp-evt-opt {
     display: block; width: 100%; text-align: left;
     padding: 7px 10px; border: none; border-radius: 5px;
@@ -623,13 +681,6 @@ onMounted(async () => {
 }
 .mp-evt-opt:hover { background: #f6f5f1; }
 .mp-evt-opt-active { background: rgba(15,118,110,.1) !important; color: #0f766e; font-weight: 600; }
-.mp-foot-evt { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
-.mp-foot-evtcode { font-size: 11px; font-weight: 700; color: #0f766e; font-family: monospace; padding-top: 1px; }
-.mp-foot-evtname { font-weight: 600; color: #1a1614; font-size: 12px; }
-.mp-foot-evtwin { font-size: 10px; color: #76706a; }
-.mp-foot-count { display: flex; align-items: center; gap: 8px; font-size: 11px; }
-.mp-foot-bar { flex: 1; height: 4px; background: #e8e4db; border-radius: 2px; overflow: hidden; }
-.mp-foot-bar span { display: block; height: 100%; background: #0f766e; border-radius: 2px; }
 
 /* ── Main area ────────────────────────────────────────────────────────────── */
 .mp-app-main { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100vh; }
@@ -650,18 +701,15 @@ onMounted(async () => {
 }
 .tb-sep { color: #a39d96; }
 .tb-here { font-weight: 500; color: #1a1614; }
-.tb-search {
+.tb-event-display {
     flex: 1; max-width: 520px;
     display: flex; align-items: center; gap: 8px;
-    background: #fff; border: 1px solid #e8e4db;
-    border-radius: 7px; padding: 6px 10px; color: #76706a;
+    background: #fbfaf6; border: 1px solid #e8e4db;
+    border-radius: 7px; padding: 7px 12px; color: #0f766e;
+    font-size: 16px;
 }
-.tb-search input { border: 0; outline: none; background: transparent; flex: 1; font-size: 13px; color: #1a1614; }
-.tb-kbd {
-    font-family: ui-monospace, monospace; font-size: 10.5px;
-    background: #f3f0e8; color: #76706a;
-    padding: 1px 6px; border-radius: 4px; letter-spacing: .04em;
-}
+.tb-event-name { font-size: 13px; font-weight: 600; color: #1a1614; }
+.tb-event-window { font-size: 11.5px; color: #76706a; margin-left: auto; }
 .tb-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .tb-icobtn {
     width: 34px; height: 34px; border-radius: 7px;
@@ -690,7 +738,80 @@ onMounted(async () => {
 .tb-user-meta { line-height: 1.15; text-align: left; }
 .tb-user-name { font-size: 12.5px; font-weight: 600; color: #1a1614; }
 .tb-user-role { font-size: 10.5px; color: #76706a; }
-.tb-user-chev { color: #76706a; }
+.tb-user-chev { color: #76706a; transition: transform .15s; }
+.tb-user-chev-open { transform: rotate(180deg); }
+
+.tb-user-wrap { position: relative; }
+.tb-user-menu {
+    position: absolute; top: calc(100% + 8px); right: 0;
+    width: 300px; background: #fff; border: 1px solid #e8e4db;
+    border-radius: 12px; box-shadow: 0 12px 32px rgba(26,22,20,.14);
+    padding: 14px; z-index: 50;
+}
+.tbm-profile { display: flex; gap: 10px; align-items: center; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #f3f0ea; }
+.tbm-avatar {
+    display: inline-grid; place-items: center;
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #7c2d12; color: #fff; font-size: 14px; font-weight: 700; flex-shrink: 0;
+}
+.tbm-profile-meta { min-width: 0; }
+.tbm-name { font-size: 14px; font-weight: 700; color: #1a1614; }
+.tbm-role { font-size: 11.5px; color: #76706a; margin-top: 1px; }
+.tbm-email {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 11.5px; color: #0f766e; margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tbm-dot { width: 6px; height: 6px; border-radius: 50%; background: #16a34a; flex-shrink: 0; }
+
+.tbm-venue { background: #fbfaf6; border: 1px solid #e8e4db; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.tbm-venue-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.tbm-badge {
+    background: #1a1614; color: #fff;
+    font-family: ui-monospace, monospace; font-size: 10px; font-weight: 600;
+    padding: 2px 6px; border-radius: 4px; letter-spacing: .04em;
+}
+.tbm-switch-wrap { position: relative; }
+.tbm-switch { border: 1px solid #e8e4db; background: #fff; border-radius: 6px; padding: 3px 10px; font-size: 11.5px; color: #1a1614; cursor: pointer; }
+.tbm-switch:hover { background: #f6f5f1; }
+.tbm-evt-menu {
+    position: absolute; top: calc(100% + 4px); right: 0;
+    width: 220px; background: #fff; border: 1px solid #e8e4db; border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.10);
+    padding: 4px; z-index: 60; max-height: 220px; overflow-y: auto;
+}
+.tbm-venue-name { font-size: 13px; font-weight: 600; color: #1a1614; }
+.tbm-venue-sub { font-size: 11px; color: #76706a; margin-top: 1px; }
+
+.tbm-section { margin-bottom: 12px; }
+.tbm-section-lbl { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #a39d96; margin-bottom: 6px; }
+.tbm-avail { display: flex; gap: 6px; }
+.tbm-avail-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    border: 1px solid #e8e4db; background: #fff; border-radius: 7px;
+    padding: 6px 4px; font-size: 11px; color: #1a1614; cursor: pointer;
+}
+.tbm-avail-btn:hover { background: #fbfaf6; }
+.tbm-avail-on { background: #1a1614; border-color: #1a1614; color: #fff; }
+.tbm-avail-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+.tbm-list { padding: 4px 0; margin-bottom: 4px; border-top: 1px solid #f3f0ea; }
+.tbm-item {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    background: none; border: none; padding: 8px 6px; font-size: 13px; color: #1a1614;
+    cursor: pointer; border-radius: 6px; text-align: left;
+}
+.tbm-item:hover { background: #fbfaf6; }
+.tbm-count { font-size: 11px; color: #76706a; background: #f3f0e8; padding: 1px 7px; border-radius: 20px; font-weight: 600; }
+.tbm-count-warn { background: #fef3c7; color: #92400e; }
+.tbm-kbd { font-family: ui-monospace, monospace; font-size: 10.5px; background: #f3f0e8; color: #76706a; padding: 1px 6px; border-radius: 4px; }
+
+.tbm-signout {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    background: none; border: none; border-top: 1px solid #f3f0ea; margin-top: 4px;
+    padding: 10px 6px 2px; font-size: 13px; font-weight: 600; color: #1a1614; cursor: pointer; text-align: left;
+}
+.tbm-signout:hover { color: #0f766e; }
 
 .mp-main { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 12px 20px; }
 
@@ -732,6 +853,4 @@ onMounted(async () => {
 .mp-sidebar-collapsed .mp-settings-item { justify-content: center; padding: 10px; }
 .mp-sidebar-collapsed .mp-settings-item span { display: none; }
 
-/* Footer hidden when collapsed */
-.mp-sidebar-collapsed .mp-foot { display: none; }
 </style>

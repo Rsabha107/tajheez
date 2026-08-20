@@ -16,22 +16,25 @@ defineProps({
 
 <template>
   <Head title="Confirmation" />
-  <div class="account-pages my-5 pt-sm-5">
-    <div class="container">
-      <div class="row justify-content-center">
-        <div class="col-md-8 col-lg-6 col-xl-5">
-          <ConfirmationCard
-            :icon="icon"
-            :icon-bg="iconBg"
-            :icon-color="iconColor"
-            :title="title"
-            :message="message"
-            :button-text="buttonText"
-            :button-href="buttonHref"
-            :button-variant="buttonVariant"
-          />
-        </div>
-      </div>
-    </div>
+  <div class="cc-page">
+    <ConfirmationCard
+      :icon="icon"
+      :icon-bg="iconBg"
+      :icon-color="iconColor"
+      :title="title"
+      :message="message"
+      :button-text="buttonText"
+      :button-href="buttonHref"
+      :button-variant="buttonVariant"
+    />
   </div>
 </template>
+
+<style scoped>
+.cc-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px 16px;
+  background: #f6f5f1;
+}
+</style>

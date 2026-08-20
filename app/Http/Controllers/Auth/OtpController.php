@@ -18,7 +18,7 @@ class OtpController extends Controller
     {
         $user = User::findOrFail($request->session()->get('otp_user_id'));
 
-        return Inertia::render('MyAuth/OtpVerification', [
+        return Inertia::render('Auth/OtpVerification', [
             'email'  => $user->email,
             'length' => config('one-time-passwords.password_length'),
         ]);
@@ -60,7 +60,7 @@ class OtpController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect()->intended(route('mypage', absolute: false));
+        return redirect()->route('material-planning.index');
     }
 
     public function resend(Request $request): RedirectResponse
