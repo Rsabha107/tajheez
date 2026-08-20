@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Models\Ems\FunctionalArea;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -35,6 +36,11 @@ class User extends Authenticatable
     public function status()
     {
         return $this->belongsTo(GlobalStatus::class, 'status_id');
+    }
+
+    public function functionalAreas()
+    {
+        return $this->belongsToMany(FunctionalArea::class, 'functional_area_user');
     }
 
     /**

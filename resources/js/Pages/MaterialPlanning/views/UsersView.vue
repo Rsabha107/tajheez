@@ -24,6 +24,14 @@ const rolePalette = [
 ];
 function roleStyle(i) { return rolePalette[i % rolePalette.length]; }
 
+const faPalette = [
+    { bg: '#ccfbf1', fg: '#0f766e' },
+    { bg: '#e0f2fe', fg: '#0369a1' },
+    { bg: '#d1fae5', fg: '#047857' },
+    { bg: '#e2e8f0', fg: '#475569' },
+];
+function faStyle(i) { return faPalette[i % faPalette.length]; }
+
 const statusOptions = computed(() => {
     const seen = new Map();
     rows.value.forEach(r => { if (r.status_name && !seen.has(r.status_color)) seen.set(r.status_color, r.status_name); });
@@ -115,10 +123,10 @@ onMounted(fetchData);
             <div v-if="loading" class="mp-dt-empty">Loading…</div>
             <table v-else class="mp-dt">
                 <thead>
-                    <tr><th>User</th><th>Status</th><th>Roles</th><th>Updated</th><th></th></tr>
+                    <tr><th>User</th><th>Status</th><th>Roles</th><th>Functional Areas</th><th>Updated</th><th></th></tr>
                 </thead>
                 <tbody>
-                    <tr v-if="!filtered.length"><td colspan="5" class="mp-dt-empty">No users found.</td></tr>
+                    <tr v-if="!filtered.length"><td colspan="6" class="mp-dt-empty">No users found.</td></tr>
                     <tr v-for="row in filtered" :key="row.id" class="mp-dt-row" @click="openEdit(row)">
                         <td>
                             <div class="user-cell">
@@ -142,6 +150,13 @@ onMounted(fetchData);
                             <span v-for="(r, i) in (row.roles ?? [])" :key="r.id ?? i"
                                 class="mp-dtag" :style="{ background: roleStyle(i).bg, color: roleStyle(i).fg }">
                                 {{ r.name ?? r }}
+                            </span>
+                        </td>
+                        <td>
+                            <span v-if="!(row.functionalAreas ?? []).length" class="mp-muted">No FAs</span>
+                            <span v-for="(fa, i) in (row.functionalAreas ?? [])" :key="fa.id ?? i"
+                                class="mp-dtag" :style="{ background: faStyle(i).bg, color: faStyle(i).fg }">
+                                {{ fa.title ?? fa }}
                             </span>
                         </td>
                         <td class="mp-dt-when">{{ row.updated_at ?? '—' }}</td>

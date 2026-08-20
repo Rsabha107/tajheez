@@ -97,6 +97,7 @@ class ServiceOptionController extends Controller
     {
         return [
             'id' => $option->code,
+            'dbId' => $option->id,
             'sku' => $option->sku,
             'name' => $option->name,
             'supplier' => $option->supplier_code,

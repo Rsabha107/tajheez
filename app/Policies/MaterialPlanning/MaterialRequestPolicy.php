@@ -15,10 +15,18 @@ class MaterialRequestPolicy
     /**
      * A request can span multiple domains — whole-request visibility is
      * never domain-gated. Only its lines (RequestLinePolicy) are.
+     *
+     * It IS gated by Functional Area, though: a user only sees requests
+     * raised under an FA they're assigned to. Requests with no FA set
+     * (legacy data, or FA scoping simply not in use) stay visible to everyone.
      */
     public function view(User $user, MaterialRequest $request): bool
     {
-        return true;
+        if ($user->hasRole('admin') || ! $request->functional_area_id) {
+            return true;
+        }
+
+        return $user->functionalAreas()->where('functional_areas.id', $request->functional_area_id)->exists();
     }
 
     public function create(User $user): bool

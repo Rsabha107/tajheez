@@ -9,6 +9,9 @@ const statuses = ref([]);
 const allRoles = ref([]);
 const roleSearch = ref("");
 const isLoadingRoles = ref(false);
+const allFunctionalAreas = ref([]);
+const faSearch = ref("");
+const isLoadingFas = ref(false);
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -27,6 +30,7 @@ const form = useForm({
   password: "",
   status_id: "",
   role_ids: [],
+  functional_area_ids: [],
 });
 
 const filteredRoles = computed(() =>
@@ -35,6 +39,14 @@ const filteredRoles = computed(() =>
         r.name.toLowerCase().includes(roleSearch.value.toLowerCase())
       )
     : allRoles.value
+);
+
+const filteredFunctionalAreas = computed(() =>
+  faSearch.value.trim()
+    ? allFunctionalAreas.value.filter((fa) =>
+        fa.title.toLowerCase().includes(faSearch.value.toLowerCase())
+      )
+    : allFunctionalAreas.value
 );
 
 async function loadStatuses() {
@@ -56,9 +68,20 @@ async function loadRoles() {
   }
 }
 
+async function loadFunctionalAreas() {
+  if (allFunctionalAreas.value.length) return;
+  try {
+    const res = await axios.get(route("functional-areas.all"));
+    allFunctionalAreas.value = res.data ?? [];
+  } catch (e) {
+    console.error("Failed to load functional areas", e);
+  }
+}
+
 onMounted(() => {
   loadStatuses();
   loadRoles();
+  loadFunctionalAreas();
 });
 
 watch(
@@ -67,6 +90,7 @@ watch(
     form.clearErrors();
     form.reset();
     roleSearch.value = "";
+    faSearch.value = "";
 
     form.id = props.user?.id ?? null;
     form.name = props.user?.name ?? "";
@@ -74,9 +98,11 @@ watch(
     form.password = "";
     form.status_id = isEdit.value ? Number(props.user?.status_id ?? "") : "";
     form.role_ids = [];
+    form.functional_area_ids = [];
 
     if (isEdit.value && props.user?.id) {
       isLoadingRoles.value = true;
+      isLoadingFas.value = true;
       try {
         const res = await axios.get(route("users.roles", props.user.id));
         form.role_ids = res.data ?? [];
@@ -84,6 +110,14 @@ watch(
         console.error("Failed to load user roles", e);
       } finally {
         isLoadingRoles.value = false;
+      }
+      try {
+        const res = await axios.get(route("users.functional-areas", props.user.id));
+        form.functional_area_ids = res.data ?? [];
+      } catch (e) {
+        console.error("Failed to load user functional areas", e);
+      } finally {
+        isLoadingFas.value = false;
       }
     }
   },
@@ -161,7 +195,7 @@ function submit() {
               />
 
               <div class="role-list">
-                <div v-if="isLoadingRoles" class="text-center py-3">
+                <div v-if="isLoadingRoles" class="text-center py-3 role-list-empty">
                   <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                 </div>
                 <template v-else>
@@ -181,7 +215,7 @@ function submit() {
                   </label>
                   <div
                     v-if="filteredRoles.length === 0"
-                    class="text-muted small py-3 text-center"
+                    class="text-muted small py-3 text-center role-list-empty"
                   >
                     No roles found.
                   </div>
@@ -190,6 +224,62 @@ function submit() {
 
               <div v-if="form.errors.role_ids" class="text-danger small mt-1">
                 {{ form.errors.role_ids }}
+              </div>
+            </div>
+
+            <!-- Functional Areas -->
+            <div class="mb-3">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <label class="form-label fw-semibold mb-0">
+                  Functional Areas
+                  <span class="badge-count">{{ form.functional_area_ids.length }} selected</span>
+                </label>
+                <button
+                  type="button"
+                  class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+                  @click="form.functional_area_ids = []"
+                >
+                  Clear all
+                </button>
+              </div>
+
+              <input
+                v-model="faSearch"
+                type="text"
+                class="form-control form-control-sm mb-2"
+                placeholder="Search functional areas…"
+              />
+
+              <div class="role-list">
+                <div v-if="isLoadingFas" class="text-center py-3 role-list-empty">
+                  <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                </div>
+                <template v-else>
+                  <label
+                    v-for="fa in filteredFunctionalAreas"
+                    :key="fa.id"
+                    class="role-check-item"
+                    :class="{ 'is-checked': form.functional_area_ids.includes(fa.id) }"
+                  >
+                    <input
+                      type="checkbox"
+                      :value="fa.id"
+                      v-model="form.functional_area_ids"
+                      class="role-checkbox"
+                    />
+                    <span>{{ fa.title }}</span>
+                  </label>
+                  <div
+                    v-if="filteredFunctionalAreas.length === 0"
+                    class="text-muted small py-3 text-center role-list-empty"
+                  >
+                    No functional areas found.
+                  </div>
+                </template>
+              </div>
+
+              <div v-if="form.errors.functional_area_ids" class="text-danger small mt-1">
+                {{ form.errors.functional_area_ids }}
               </div>
             </div>
           </form>
@@ -283,47 +373,57 @@ function submit() {
 }
 
 .role-list {
-  max-height: 180px;
+  max-height: 220px;
   overflow-y: auto;
-  border: 1px solid #eaecf6;
-  border-radius: 12px;
-  padding: 6px 4px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 2px;
+}
+
+.role-list-empty {
+  grid-column: 1 / -1;
 }
 
 .role-check-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid #e8e4db;
   border-radius: 8px;
+  background: #fff;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
   font-size: 13px;
-  color: #374151;
+  color: #3d3833;
   user-select: none;
+  min-width: 0;
+}
+
+.role-check-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .role-check-item:hover {
-  background: #f5f7ff;
+  border-color: #a39d96;
 }
 
 .role-check-item.is-checked {
-  background: #eef2ff;
-  color: #3a5bd9;
-  font-weight: 500;
+  background: rgba(15, 118, 110, 0.08);
+  border-color: #0f766e;
+  color: #0f766e;
+  font-weight: 600;
 }
 
 .role-checkbox {
   width: 16px;
   height: 16px;
   border-radius: 4px;
-  border-color: #5b8df6;
+  accent-color: #0f766e;
   flex-shrink: 0;
   cursor: pointer;
-}
-
-.role-checkbox:checked {
-  background-color: #3a5bd9;
-  border-color: #3a5bd9;
 }
 </style>

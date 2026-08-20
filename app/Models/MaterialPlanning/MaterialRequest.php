@@ -3,6 +3,7 @@
 namespace App\Models\MaterialPlanning;
 
 use App\Models\Ems\Event;
+use App\Models\Ems\FunctionalArea;
 use App\Models\Ems\Venue;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -46,6 +47,11 @@ class MaterialRequest extends Model
     public function owner()
     {
         return $this->belongsTo(User::class, 'owner_user_id');
+    }
+
+    public function functionalArea()
+    {
+        return $this->belongsTo(FunctionalArea::class, 'functional_area_id');
     }
 
     public function lines()

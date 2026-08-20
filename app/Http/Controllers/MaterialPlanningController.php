@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Classification;
 use App\Models\Ems\Event;
+use App\Models\Ems\FunctionalArea;
 use App\Models\Ems\Venue;
 use App\Models\GlobalStatus;
 use App\Models\MaterialPlanning\Area;
@@ -46,9 +47,13 @@ class MaterialPlanningController extends Controller
     public function index(): Response
     {
         $user = auth()->user();
+        $isAdmin = $user?->hasRole('admin') ?? false;
+        $userFunctionalAreaIds = $user?->functionalAreas()->pluck('functional_areas.id')->all() ?? [];
+
         $permissions = [
-            'isAdmin' => $user?->hasRole('admin') ?? false,
+            'isAdmin' => $isAdmin,
             'managedDomain' => $user?->managed_domain,
+            'functionalAreaIds' => $userFunctionalAreaIds,
         ];
 
         $domains = Domain::with('status')->withCount('itemGroups')->orderBy('sort_order')->get();
@@ -67,7 +72,15 @@ class MaterialPlanningController extends Controller
         $catalogItems = CatalogItem::orderBy('sku')->get();
         $serviceOptions = ServiceOption::with(['classification', 'status'])->orderBy('id')->get();
 
-        $requests = MaterialRequest::with(['venue', 'owner', 'lines.catalogItem'])->orderByDesc('id')->get();
+        $requests = MaterialRequest::with(['venue', 'owner', 'functionalArea', 'lines.catalogItem'])
+            ->when(! $isAdmin, fn ($q) => $q->whereIn('functional_area_id', $userFunctionalAreaIds))
+            ->orderByDesc('id')->get();
+
+        // Requests are scoped to a Functional Area — a regular user only ever picks
+        // from the FA(s) they themselves are assigned to when raising a new request.
+        $functionalAreas = FunctionalArea::query()
+            ->when(! $isAdmin, fn ($q) => $q->whereIn('id', $userFunctionalAreaIds))
+            ->orderBy('title')->get();
         $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.supplier'])
             ->orderByDesc('id')->get();
 
@@ -197,10 +210,16 @@ class MaterialPlanningController extends Controller
 
             'people' => $people,
 
+            'functionalAreas' => $functionalAreas->map(fn (FunctionalArea $fa) => [
+                'id' => $fa->id,
+                'title' => $fa->title,
+            ])->values()->all(),
+
             'requests' => $requests->map(fn (MaterialRequest $r) => [
                 'id' => $r->code,
                 'title' => $r->title,
                 'venue' => $r->venue?->short_name,
+                'functionalArea' => $r->functionalArea?->title,
                 'site' => $r->site_name,
                 'domain' => $r->domain,
                 'status' => $r->status,
@@ -246,6 +265,10 @@ class MaterialPlanningController extends Controller
 
             'serviceOptions' => $serviceOptions->map(fn (ServiceOption $o) => [
                 'id' => $o->code,
+                // Real numeric PK — `id` above is the human-readable code used
+                // everywhere else in the UI, but assigning a line to an option
+                // needs the actual FK value (mp_request_lines.service_option_id).
+                'dbId' => $o->id,
                 'sku' => $o->sku,
                 'name' => $o->name,
                 'supplier' => $o->supplier_code,

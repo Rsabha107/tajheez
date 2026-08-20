@@ -24,7 +24,7 @@ class MaterialRequestController extends Controller
     public function show(string $code)
     {
         $materialRequest = MaterialRequest::with([
-            'venue', 'owner',
+            'venue', 'owner', 'functionalArea',
             'lines.catalogItem', 'lines.serviceOption.supplier',
             'approvalSteps.approver',
             'activity.actor',
@@ -44,6 +44,7 @@ class MaterialRequestController extends Controller
             'title' => ['nullable', 'string', 'max:200'],
             'event_id' => ['required', 'exists:events,id'],
             'venue_id' => ['required', 'exists:venues,id'],
+            'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['nullable', 'string', 'max:120'],
@@ -83,6 +84,7 @@ class MaterialRequestController extends Controller
             'title' => ['sometimes', 'nullable', 'string', 'max:200'],
             'event_id' => ['sometimes', 'exists:events,id'],
             'venue_id' => ['sometimes', 'exists:venues,id'],
+            'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['sometimes', 'string', 'max:120'],
@@ -183,6 +185,8 @@ class MaterialRequestController extends Controller
         return array_merge($this->present($materialRequest), [
             'title' => $materialRequest->title,
             'venue' => $materialRequest->venue?->short_name,
+            'functionalAreaId' => $materialRequest->functional_area_id,
+            'functionalArea' => $materialRequest->functionalArea?->title,
             'site' => $materialRequest->site_name,
             'siteType' => $materialRequest->site_type,
             'siteCode' => $materialRequest->site_code,

@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
+import axios from 'axios';
 import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
+import AssignServiceOptionModal from '../components/AssignServiceOptionModal.vue';
 
 const props = defineProps({
     requests:      Array,
@@ -14,10 +16,11 @@ const props = defineProps({
     people:        Array,
     catalog:       { type: Array, default: () => [] },
     suppliers:     { type: Array, default: () => [] },
+    serviceOptions: { type: Array, default: () => [] },
     permissions:   { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
 });
 
-const emit = defineEmits(['go-to']);
+const emit = defineEmits(['go-to', 'refresh-detail']);
 
 const stateStyles = {
     done:   { bg: '#dcfce7', fg: '#14532d', dot: '#166534', lbl: 'Approved' },
@@ -74,15 +77,50 @@ function fmtDateTime(s) {
     return new Date(s.replace(' ', 'T')).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-// ── Add service option (domain managers + admins only) ───────────────────────
+// ── Assign a service option to a line (domain managers + admins only) ────────
 function canAddServiceOption(domain) {
     return props.permissions.isAdmin || props.permissions.managedDomain === domain;
 }
-const showAddOptionFor = ref(null);
-const addedOptions = ref([]);
-function onOptionAdded(option) {
-    addedOptions.value.push(option);
-    showAddOptionFor.value = null;
+
+const assignTarget = ref(null);   // the request line being assigned an option
+const assignSaving = ref(false);
+const assignError = ref(null);
+const creatingNewOption = ref(false); // true = show NewServiceOptionModal for assignTarget instead
+
+function openAssign(line) {
+    assignTarget.value = line;
+    assignError.value = null;
+    creatingNewOption.value = false;
+}
+function closeAssign() {
+    assignTarget.value = null;
+    creatingNewOption.value = false;
+}
+function switchToCreateNew() {
+    creatingNewOption.value = true;
+}
+
+async function assignOption(dbId) {
+    if (!assignTarget.value) return;
+    assignSaving.value = true;
+    assignError.value = null;
+    try {
+        await axios.put(route('mp.request-lines.update', assignTarget.value.id), { service_option_id: dbId });
+        closeAssign();
+        emit('refresh-detail');
+    } catch (e) {
+        assignError.value = e.response?.status === 403
+            ? "You don't have permission to assign an option for this item's domain."
+            : 'Could not assign this service option.';
+    } finally {
+        assignSaving.value = false;
+    }
+}
+
+// Option created via the "+ New option instead" fallback — assign it straight away.
+function onOptionCreated(option) {
+    creatingNewOption.value = false;
+    if (option.dbId) assignOption(option.dbId);
 }
 
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
@@ -196,7 +234,7 @@ function avatarColor(name) {
             <div v-if="detailTab === 'items'" class="mp-card mp-card-flush">
                 <div v-if="!detailLines.length" class="mp-empty">No line items yet.</div>
                 <table v-else class="mp-dt">
-                    <thead><tr><th>SKU</th><th>Item</th><th class="ta-c">Qty</th><th>Unit</th><th class="ta-c">Rate</th><th class="ta-c">Total</th><th>Comment</th><th></th></tr></thead>
+                    <thead><tr><th>SKU</th><th>Item</th><th class="ta-c">Qty</th><th>Unit</th><th class="ta-c">Rate</th><th class="ta-c">Total</th><th>Comment</th><th>Service</th><th></th></tr></thead>
                     <tbody>
                         <tr v-for="l in detailLines" :key="l.id">
                             <td class="mono">{{ l.sku }}</td>
@@ -206,29 +244,47 @@ function avatarColor(name) {
                             <td class="ta-c mono">{{ fmtMoney(l.rate) }}</td>
                             <td class="ta-c mono">{{ fmtMoney(l.value) }}</td>
                             <td>{{ l.comment }}</td>
+                            <td>
+                                <div v-if="l.serviceOptionName" class="mp-dt-optn">
+                                    <div>{{ l.serviceOptionName }}</div>
+                                    <div class="mp-dt-optn-sup">{{ l.supplierName }}</div>
+                                </div>
+                                <span v-else class="mp-muted">Unassigned</span>
+                            </td>
                             <td class="ta-r">
                                 <button
                                     v-if="canAddServiceOption(catalogOf(l.sku)?.domain)"
                                     class="mp-btn mp-btn-sm"
-                                    @click="showAddOptionFor = l.sku"
-                                >+ Option</button>
-                                <span v-if="addedOptions.some(o => o.sku === l.sku)" class="mp-dt-optn">
-                                    {{ addedOptions.filter(o => o.sku === l.sku).length }} added
-                                </span>
+                                    @click="openAssign(l)"
+                                >{{ l.serviceOptionName ? 'Change' : '+ Option' }}</button>
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
 
+            <AssignServiceOptionModal
+                v-if="assignTarget && !creatingNewOption"
+                :sku="assignTarget.sku"
+                :item-name="assignTarget.name"
+                :service-options="serviceOptions"
+                :suppliers="suppliers"
+                :current-option-id="assignTarget.serviceOptionId"
+                :saving="assignSaving"
+                :error="assignError"
+                @close="closeAssign"
+                @assign="assignOption"
+                @create-new="switchToCreateNew"
+            />
+
             <NewServiceOptionModal
-                v-if="showAddOptionFor"
+                v-if="assignTarget && creatingNewOption"
                 :catalog="catalog"
                 :suppliers="suppliers"
                 :domains="domains"
-                :locked-sku="showAddOptionFor"
-                @close="showAddOptionFor = null"
-                @add="onOptionAdded"
+                :locked-sku="assignTarget.sku"
+                @close="closeAssign"
+                @add="onOptionCreated"
             />
 
             <!-- Change order tab -->
@@ -383,7 +439,9 @@ function avatarColor(name) {
 }
 .mp-dt th.ta-c { text-align: center; }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
-.mp-dt-optn { display: inline-block; margin-left: 8px; font-size: 11px; color: #0f766e; font-weight: 600; white-space: nowrap; }
+.mp-dt-optn { font-size: 12.5px; color: #1a1614; white-space: nowrap; }
+.mp-dt-optn-sup { font-size: 11px; color: #76706a; margin-top: 1px; }
+.mp-muted { color: #a39d96; font-size: 12px; }
 
 .mp-diff { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mp-diff th { background: #fbfaf6; border-bottom: 1px solid #e8e4db; color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px 14px; text-align: left; }

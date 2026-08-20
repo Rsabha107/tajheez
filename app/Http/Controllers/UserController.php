@@ -270,7 +270,7 @@ class UserController extends Controller
                 'users.created_at',
                 'users.updated_at',
             ])
-            ->with('roles:id,name');
+            ->with(['roles:id,name', 'functionalAreas:id,title']);
 
         if ($search) {
             $query->where(function ($q) use ($search) {
@@ -294,6 +294,7 @@ class UserController extends Controller
                 'created_at'   => $u->created_at?->format('Y-m-d'),
                 'updated_at'   => $u->updated_at?->format('Y-m-d'),
                 'roles'        => $u->roles->map(fn($r) => ['id' => $r->id, 'name' => $r->name])->values(),
+                'functionalAreas' => $u->functionalAreas->map(fn($fa) => ['id' => $fa->id, 'title' => $fa->title])->values(),
             ])
             ->values();
 
@@ -305,6 +306,11 @@ class UserController extends Controller
         return response()->json($user->roles->pluck('id'));
     }
 
+    public function functionalAreas(User $user)
+    {
+        return response()->json($user->functionalAreas->pluck('id'));
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -314,15 +320,19 @@ class UserController extends Controller
             'status_id' => ['required', 'exists:global_statuses,id'],
             'role_ids' => ['nullable', 'array'],
             'role_ids.*' => ['integer', 'exists:roles,id'],
+            'functional_area_ids' => ['nullable', 'array'],
+            'functional_area_ids.*' => ['integer', 'exists:functional_areas,id'],
         ]);
 
         try {
             $data['password'] = bcrypt($data['password']);
             $roleIds = $data['role_ids'] ?? [];
-            unset($data['role_ids']);
+            $faIds = $data['functional_area_ids'] ?? [];
+            unset($data['role_ids'], $data['functional_area_ids']);
 
             $user = User::create($data);
             $user->syncRoles($roleIds);
+            $user->functionalAreas()->sync($faIds);
             $user->touch();
 
             return back()->with('success', 'User created successfully.');
@@ -342,6 +352,8 @@ class UserController extends Controller
             'status_id'  => ['required', 'exists:global_statuses,id'],
             'role_ids'   => ['nullable', 'array'],
             'role_ids.*' => ['integer', 'exists:roles,id'],
+            'functional_area_ids' => ['nullable', 'array'],
+            'functional_area_ids.*' => ['integer', 'exists:functional_areas,id'],
         ]);
 
         try {
@@ -352,10 +364,12 @@ class UserController extends Controller
             }
 
             $roleIds = $data['role_ids'] ?? [];
-            unset($data['role_ids']);
+            $faIds = $data['functional_area_ids'] ?? [];
+            unset($data['role_ids'], $data['functional_area_ids']);
 
             $user->update($data);
             $user->syncRoles($roleIds);
+            $user->functionalAreas()->sync($faIds);
             $user->touch();
 
             return back()->with('success', 'User updated successfully.');

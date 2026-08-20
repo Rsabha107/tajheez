@@ -134,6 +134,7 @@ Route::middleware('auth')->group(function () {
 
         // Route::get('/users', 'index')->name('users.index');
         Route::get('/api/users/{user}/roles', 'roles')->name('users.roles');
+        Route::get('/api/users/{user}/functional-areas', 'functionalAreas')->name('users.functional-areas');
         Route::post('/users', 'store')->name('users.store');
         Route::put('/users/{user}', 'update')->name('users.update');
         Route::delete('/users/{user}', 'destroy')->name('users.destroy');

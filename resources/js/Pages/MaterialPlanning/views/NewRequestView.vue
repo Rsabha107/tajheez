@@ -13,6 +13,7 @@ const props = defineProps({
     people:     Array,
     prefillSku: { type: String, default: null },
     approvalsEnabled: { type: Boolean, default: true },
+    functionalAreas: { type: Array, default: () => [] },
 });
 
 const emit = defineEmits(['go-to', 'request-saved']);
@@ -22,6 +23,7 @@ function freshForm() {
     return {
         title: '',
         venue: '',
+        functionalArea: props.functionalAreas.length === 1 ? props.functionalAreas[0].id : '',
         siteType: '',
         siteCode: '',
         siteName: '',
@@ -144,6 +146,7 @@ const canSave = computed(() => !!props.event?.id);
 async function persist(shouldSubmit) {
     if (saving.value || !canSave.value) return;
     if (!form.value.venue) { error.value = 'Select a venue.'; return; }
+    if (props.functionalAreas.length && !form.value.functionalArea) { error.value = 'Select a functional area.'; return; }
     if (!formLines.value.some(l => l.sku)) { error.value = 'Add at least one item.'; return; }
 
     saving.value = true;
@@ -155,6 +158,7 @@ async function persist(shouldSubmit) {
         payload.append('title', form.value.title.trim() || 'Untitled request');
         payload.append('event_id', props.event.id);
         payload.append('venue_id', form.value.venue);
+        if (form.value.functionalArea) payload.append('functional_area_id', form.value.functionalArea);
         if (form.value.siteType) payload.append('site_type', form.value.siteType);
         if (form.value.siteCode) payload.append('site_code', form.value.siteCode);
         if (form.value.siteName) payload.append('site_name', form.value.siteName);
@@ -262,6 +266,13 @@ async function persist(shouldSubmit) {
                     <select v-model="form.venue">
                         <option value="">— Venue —</option>
                         <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} · {{ v.name }}</option>
+                    </select>
+                </div>
+                <div v-if="functionalAreas.length" class="mp-field">
+                    <label>Functional Area <span class="mp-req">*</span></label>
+                    <select v-model="form.functionalArea">
+                        <option value="">— Functional Area —</option>
+                        <option v-for="fa in functionalAreas" :key="fa.id" :value="fa.id">{{ fa.title }}</option>
                     </select>
                 </div>
                 <div class="mp-field">

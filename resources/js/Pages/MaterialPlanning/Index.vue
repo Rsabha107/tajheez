@@ -46,6 +46,7 @@ const props = defineProps({
     changeOrders:   Array,
     coStates:       Object,
     permissions:    Object,
+    functionalAreas: { type: Array, default: () => [] },
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────
@@ -518,6 +519,7 @@ onMounted(async () => {
                     :people="people"
                     :prefill-sku="prefilledSku"
                     :approvals-enabled="approvalsEnabled"
+                    :functional-areas="functionalAreas"
                     @go-to="goTo"
                     @request-saved="onRequestSaved"
                 />
@@ -635,8 +637,10 @@ onMounted(async () => {
                     :people="people"
                     :catalog="catalog"
                     :suppliers="suppliers"
+                    :service-options="serviceOptions"
                     :permissions="permissions"
                     @go-to="goTo"
+                    @refresh-detail="() => openRequest(detailId)"
                 />
 
                 <EventsView           v-else-if="activePage === 'events'" />
