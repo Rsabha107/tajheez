@@ -57,7 +57,7 @@ const statusCounts = computed(() => {
 const priorityColors = { Critical: '#991b1b', High: '#b45309', Medium: '#6b7280', Low: '#9ca3af' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)  { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 
@@ -106,7 +106,7 @@ function avatarColor(initials) {
                 <label>Domain</label>
                 <select v-model="reqDomain">
                     <option value="all">All</option>
-                    <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
+                    <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
                 </select>
             </div>
             <div class="mp-fb-sel">

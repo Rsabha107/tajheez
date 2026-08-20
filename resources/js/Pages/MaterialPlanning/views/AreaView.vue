@@ -4,18 +4,30 @@ import axios from 'axios';
 
 const props = defineProps({
     areas:       Array,
+    statuses:    { type: Array, default: () => [] },
     permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     event:       { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 const areaList = ref([...props.areas]);
 
+const STATUS_COLORS = {
+    success: { bg: '#dcfce7', fg: '#166534' },
+    secondary: { bg: '#efece4', fg: '#3d3833' },
+    danger: { bg: '#fee2e2', fg: '#991b1b' },
+    warning: { bg: '#fef3c7', fg: '#92400e' },
+    info: { bg: '#dbeafe', fg: '#1e3a8a' },
+    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
+};
+function statusMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
+function defaultStatusId() { return props.statuses.find(s => s.name === 'active')?.id ?? props.statuses[0]?.id ?? ''; }
+
 const q = ref('');
 const rows = computed(() => {
     let r = areaList.value.slice();
     if (q.value) {
         const k = q.value.toLowerCase();
-        r = r.filter(a => a.label.toLowerCase().includes(k) || a.id.toLowerCase().includes(k));
+        r = r.filter(a => a.label.toLowerCase().includes(k) || a.code.toLowerCase().includes(k));
     }
     return r.sort((a, b) => a.sortOrder - b.sortOrder);
 });
@@ -27,7 +39,7 @@ const error = ref(null);
 const justAdded = ref(null);
 
 function freshForm() {
-    return { code: '', label: '', description: '', sortOrder: areaList.value.length + 1 };
+    return { code: '', label: '', description: '', sortOrder: areaList.value.length + 1, status: defaultStatusId() };
 }
 const form = ref(freshForm());
 const formValid = computed(() => /^[A-Z0-9_]+$/.test(form.value.code) && form.value.label.trim());
@@ -49,6 +61,7 @@ async function addArea() {
             label: form.value.label.trim(),
             description: form.value.description.trim() || null,
             sort_order: +form.value.sortOrder || 0,
+            status_id: form.value.status,
         });
         areaList.value.push(data);
         justAdded.value = data.id;
@@ -104,6 +117,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <th>Area</th>
                         <th>Code</th>
                         <th>Description</th>
+                        <th>Status</th>
                         <th class="ta-r">Spaces</th>
                         <th></th>
                     </tr>
@@ -111,15 +125,16 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <tbody>
                     <tr v-for="a in rows" :key="a.id" :class="{ 'area-row-new': justAdded === a.id }">
                         <td class="area-name">{{ a.label }}</td>
-                        <td class="mono">{{ a.id }}</td>
+                        <td class="mono">{{ a.code }}</td>
                         <td class="area-desc">{{ a.description || '—' }}</td>
+                        <td><span class="status-chip" :style="{ background: statusMeta(a.statusColor).bg, color: statusMeta(a.statusColor).fg }">{{ a.statusName || '—' }}</span></td>
                         <td class="ta-r mono">{{ a.spacesCount }}</td>
                         <td class="ta-r">
                             <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteArea(a)">Remove</button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
-                        <td colspan="5" class="area-empty">No areas match this search.</td>
+                        <td colspan="6" class="area-empty">No areas match this search.</td>
                     </tr>
                 </tbody>
             </table>
@@ -157,6 +172,15 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <div class="field" style="grid-column: span 2">
                                 <label class="field-lbl">Label</label>
                                 <input v-model="form.label" placeholder="e.g. Sport"/>
+                            </div>
+                            <div class="field">
+                                <label class="field-lbl">Status</label>
+                                <div class="sel">
+                                    <select v-model="form.status">
+                                        <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.name }}</option>
+                                    </select>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </div>
                             </div>
                             <div class="field" style="grid-column: span 2">
                                 <label class="field-lbl">Description</label>
@@ -222,6 +246,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .area-name { font-weight: 500; }
 .area-desc { font-size: 12.5px; color: #76706a; }
 .area-empty { text-align: center; padding: 24px; color: #76706a; }
+.status-chip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 20px; }
 
 @keyframes area-newrow { 0%, 100% { background: transparent; } 20% { background: rgba(15,118,110,.12); } }
 .area-row-new td { animation: area-newrow 2.4s ease; }
@@ -278,6 +303,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.sel { position: relative; display: flex; align-items: center; }
+.sel select {
+    width: 100%; appearance: none; border: 1px solid #e8e4db; border-radius: 7px;
+    padding: 8px 30px 8px 11px; font-size: 13px; color: #1a1614; background: #fff;
+    outline: none; cursor: pointer; transition: border-color .12s;
+}
+.sel select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.sel svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
 
 .skum-ft {
     display: flex; align-items: center; justify-content: space-between;

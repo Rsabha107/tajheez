@@ -25,7 +25,12 @@ class ChangeOrderLine extends Model
 
     public function catalogItem()
     {
-        return $this->belongsTo(CatalogItem::class, 'sku', 'sku');
+        return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
+    }
+
+    public function getSkuAttribute()
+    {
+        return $this->catalogItem?->sku;
     }
 
     public function serviceOptionBefore()

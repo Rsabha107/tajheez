@@ -44,14 +44,14 @@ const driftPct = computed(() => baseline.value ? (appliedDrift.value / baseline.
 const byDomain = computed(() => {
     const rows = props.domains.map(d => ({
         ...d,
-        v: props.changeOrders.filter(r => r.state === 'approved' && r.domain === d.id).reduce((s, r) => s + r.delta, 0),
+        v: props.changeOrders.filter(r => r.state === 'approved' && r.domain === d.code).reduce((s, r) => s + r.delta, 0),
     })).filter(x => x.v !== 0);
     return rows;
 });
 const maxAbs = computed(() => Math.max(1, ...byDomain.value.map(x => Math.abs(x.v))));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)  { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 function fmtDelta(v)   { return v === 0 ? '—' : (v > 0 ? '+' : '−') + fmtMoney(Math.abs(v)); }
@@ -124,7 +124,7 @@ function avatarColor(initials) {
                 <label>Domain</label>
                 <select v-model="domain">
                     <option value="all">All</option>
-                    <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
+                    <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
                 </select>
             </div>
             <div class="fb-sel">

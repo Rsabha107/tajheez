@@ -16,6 +16,9 @@ use App\Http\Controllers\MaterialPlanning\AreaController;
 use App\Http\Controllers\MaterialPlanning\CatalogItemController;
 use App\Http\Controllers\MaterialPlanning\ChangeOrderController;
 use App\Http\Controllers\MaterialPlanning\ChangeOrderLineController;
+use App\Http\Controllers\MaterialPlanning\DomainController;
+use App\Http\Controllers\MaterialPlanning\ItemGroupController;
+use App\Http\Controllers\MaterialPlanning\ItemSubgroupController;
 use App\Http\Controllers\MaterialPlanning\MaterialRequestController;
 use App\Http\Controllers\MaterialPlanning\RequestLineController;
 use App\Http\Controllers\MaterialPlanning\ServiceOptionController;
@@ -155,8 +158,8 @@ Route::middleware('auth')->group(function () {
 
     Route::controller(CatalogItemController::class)->group(function () {
         Route::post('/api/mp/catalog-items', 'store')->name('mp.catalog-items.store');
-        Route::put('/api/mp/catalog-items/{catalogItem:sku}', 'update')->name('mp.catalog-items.update');
-        Route::delete('/api/mp/catalog-items/{catalogItem:sku}', 'destroy')->name('mp.catalog-items.destroy');
+        Route::put('/api/mp/catalog-items/{catalogItem}', 'update')->name('mp.catalog-items.update');
+        Route::delete('/api/mp/catalog-items/{catalogItem}', 'destroy')->name('mp.catalog-items.destroy');
     });
 
     Route::controller(ServiceOptionController::class)->group(function () {
@@ -168,15 +171,22 @@ Route::middleware('auth')->group(function () {
     Route::controller(SupplierController::class)->group(function () {
         Route::get('/api/mp/suppliers', 'data')->name('mp.suppliers.data');
         Route::post('/api/mp/suppliers', 'store')->name('mp.suppliers.store');
-        Route::put('/api/mp/suppliers/{supplier:code}', 'update')->name('mp.suppliers.update');
-        Route::delete('/api/mp/suppliers/{supplier:code}', 'destroy')->name('mp.suppliers.destroy');
+        Route::put('/api/mp/suppliers/{supplier}', 'update')->name('mp.suppliers.update');
+        Route::delete('/api/mp/suppliers/{supplier}', 'destroy')->name('mp.suppliers.destroy');
+    });
+
+    Route::controller(DomainController::class)->group(function () {
+        Route::get('/api/mp/domains', 'data')->name('mp.domains.data');
+        Route::post('/api/mp/domains', 'store')->name('mp.domains.store');
+        Route::put('/api/mp/domains/{domain}', 'update')->name('mp.domains.update');
+        Route::delete('/api/mp/domains/{domain}', 'destroy')->name('mp.domains.destroy');
     });
 
     Route::controller(AreaController::class)->group(function () {
         Route::get('/api/mp/areas', 'data')->name('mp.areas.data');
         Route::post('/api/mp/areas', 'store')->name('mp.areas.store');
-        Route::put('/api/mp/areas/{area:code}', 'update')->name('mp.areas.update');
-        Route::delete('/api/mp/areas/{area:code}', 'destroy')->name('mp.areas.destroy');
+        Route::put('/api/mp/areas/{area}', 'update')->name('mp.areas.update');
+        Route::delete('/api/mp/areas/{area}', 'destroy')->name('mp.areas.destroy');
     });
 
     Route::controller(SpaceController::class)->group(function () {
@@ -186,7 +196,22 @@ Route::middleware('auth')->group(function () {
         Route::delete('/api/mp/spaces/{space}', 'destroy')->name('mp.spaces.destroy');
     });
 
+    Route::controller(ItemGroupController::class)->group(function () {
+        Route::get('/api/mp/item-groups', 'data')->name('mp.item-groups.data');
+        Route::post('/api/mp/item-groups', 'store')->name('mp.item-groups.store');
+        Route::put('/api/mp/item-groups/{itemGroup}', 'update')->name('mp.item-groups.update');
+        Route::delete('/api/mp/item-groups/{itemGroup}', 'destroy')->name('mp.item-groups.destroy');
+    });
+
+    Route::controller(ItemSubgroupController::class)->group(function () {
+        Route::get('/api/mp/item-subgroups', 'data')->name('mp.item-subgroups.data');
+        Route::post('/api/mp/item-subgroups', 'store')->name('mp.item-subgroups.store');
+        Route::put('/api/mp/item-subgroups/{itemSubgroup}', 'update')->name('mp.item-subgroups.update');
+        Route::delete('/api/mp/item-subgroups/{itemSubgroup}', 'destroy')->name('mp.item-subgroups.destroy');
+    });
+
     Route::controller(MaterialRequestController::class)->group(function () {
+        Route::get('/api/mp/requests/{code}', 'show')->name('mp.requests.show');
         Route::post('/api/mp/requests', 'store')->name('mp.requests.store');
         Route::put('/api/mp/requests/{materialRequest}', 'update')->name('mp.requests.update');
         Route::post('/api/mp/requests/{materialRequest}/submit', 'submit')->name('mp.requests.submit');

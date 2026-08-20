@@ -4,6 +4,7 @@ namespace App\Http\Controllers\MaterialPlanning;
 
 use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\CatalogItem;
+use App\Models\MaterialPlanning\Domain;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
@@ -25,6 +26,8 @@ class CatalogItemController extends Controller
 
         Gate::authorize('create', [CatalogItem::class, $data['domain_code']]);
 
+        $data['domain_id'] = Domain::where('code', $data['domain_code'])->value('id');
+        unset($data['domain_code']);
         $data['stock'] = $data['stock'] ?? 0;
         $item = CatalogItem::create($data);
         $item->ensureOwnPoolOption();

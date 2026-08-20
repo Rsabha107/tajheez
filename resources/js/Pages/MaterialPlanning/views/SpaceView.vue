@@ -5,11 +5,23 @@ import axios from 'axios';
 const props = defineProps({
     spaces:      Array,
     areas:       Array,
+    statuses:    { type: Array, default: () => [] },
     permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     event:       { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 const spaceList = ref([...props.spaces]);
+
+const STATUS_COLORS = {
+    success: { bg: '#dcfce7', fg: '#166534' },
+    secondary: { bg: '#efece4', fg: '#3d3833' },
+    danger: { bg: '#fee2e2', fg: '#991b1b' },
+    warning: { bg: '#fef3c7', fg: '#92400e' },
+    info: { bg: '#dbeafe', fg: '#1e3a8a' },
+    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
+};
+function statusMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
+function defaultStatusId() { return props.statuses.find(s => s.name === 'active')?.id ?? props.statuses[0]?.id ?? ''; }
 
 const q = ref('');
 const fArea = ref('all');
@@ -32,7 +44,7 @@ const error = ref(null);
 const justAdded = ref(null);
 
 function freshForm() {
-    return { code: '', area: props.areas[0]?.id ?? '', name: '', description: '' };
+    return { code: '', area: props.areas[0]?.id ?? '', name: '', description: '', status: defaultStatusId() };
 }
 const form = ref(freshForm());
 const formValid = computed(() => form.value.code.trim() && form.value.area && form.value.name.trim());
@@ -51,9 +63,10 @@ async function addSpace() {
     try {
         const { data } = await axios.post(route('mp.spaces.store'), {
             code: form.value.code.trim(),
-            area_code: form.value.area,
+            area_id: form.value.area,
             name: form.value.name.trim(),
             description: form.value.description.trim() || null,
+            status_id: form.value.status,
         });
         spaceList.value.unshift(data);
         justAdded.value = data.id;
@@ -117,6 +130,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <th>Code</th>
                         <th>Area</th>
                         <th>Description</th>
+                        <th>Status</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -126,12 +140,13 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <td class="mono">{{ s.code }}</td>
                         <td><span class="space-area">{{ s.areaLabel || areaLabel(s.area) }}</span></td>
                         <td class="space-desc">{{ s.description || '—' }}</td>
+                        <td><span class="status-chip" :style="{ background: statusMeta(s.statusColor).bg, color: statusMeta(s.statusColor).fg }">{{ s.statusName || '—' }}</span></td>
                         <td class="ta-r">
                             <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteSpace(s)">Remove</button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
-                        <td colspan="5" class="space-empty">No spaces match these filters.</td>
+                        <td colspan="6" class="space-empty">No spaces match these filters.</td>
                     </tr>
                 </tbody>
             </table>
@@ -173,6 +188,15 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <div class="field" style="grid-column: span 2">
                                 <label class="field-lbl">Name</label>
                                 <input v-model="form.name" placeholder="e.g. Mixed Zone"/>
+                            </div>
+                            <div class="field">
+                                <label class="field-lbl">Status</label>
+                                <div class="sel">
+                                    <select v-model="form.status">
+                                        <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.name }}</option>
+                                    </select>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </div>
                             </div>
                             <div class="field" style="grid-column: span 2">
                                 <label class="field-lbl">Description</label>
@@ -247,6 +271,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .space-desc { font-size: 12.5px; color: #76706a; }
 .space-area { font-size: 12px; color: #3d3833; background: #f6f5f1; padding: 2px 8px; border-radius: 5px; }
 .space-empty { text-align: center; padding: 24px; color: #76706a; }
+.status-chip { display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 20px; }
 
 @keyframes space-newrow { 0%, 100% { background: transparent; } 20% { background: rgba(15,118,110,.12); } }
 .space-row-new td { animation: space-newrow 2.4s ease; }

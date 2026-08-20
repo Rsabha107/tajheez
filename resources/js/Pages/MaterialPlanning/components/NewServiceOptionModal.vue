@@ -14,14 +14,14 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'add']);
 
-function domainOf(id)   { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code) { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function catalogOf(sku) { return props.catalog.find(c => c.sku === sku); }
 function fmtMoney(n)    { return '$' + Number(n).toLocaleString('en-US'); }
 
 function freshForm() {
     return {
         sku: props.lockedSku ?? (props.catalog[0]?.sku ?? ''),
-        name: '', supplier: props.suppliers[0]?.id ?? '',
+        name: '', supplier: props.suppliers[0]?.code ?? '',
         cost: '', lead: '14', sla: 'Next business day',
         capacity: '', contract: '', spec: '', isDefault: false,
     };
@@ -136,7 +136,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 <label class="field-lbl">Supplier</label>
                                 <div class="sel">
                                     <select v-model="form.supplier">
-                                        <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}{{ s.status === 'suspended' ? ' (suspended)' : '' }}</option>
+                                        <option v-for="s in suppliers" :key="s.id" :value="s.code">{{ s.name }}{{ s.classificationName === 'Suspended' ? ' (suspended)' : '' }}</option>
                                     </select>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                                 </div>

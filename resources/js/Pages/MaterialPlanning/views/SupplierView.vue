@@ -3,10 +3,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 
 const props = defineProps({
-    suppliers:   Array,
-    people:      { type: Array, default: () => [] },
-    permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
-    event:       { type: Object, default: () => ({ code: 'EVT' }) },
+    suppliers:       Array,
+    classifications: { type: Array, default: () => [] },
+    statuses:        { type: Array, default: () => [] },
+    permissions:     { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
+    event:           { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 // Local writable copy so we can optimistically reflect writes
@@ -14,37 +15,34 @@ const supplierList = ref([...props.suppliers]);
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 const q = ref('');
-const fStatus = ref('all');
+const fClassification = ref('all');
 
-function personOf(ini) { return (props.people || []).find(p => p.initials === ini) || { name: ini }; }
-function fmtDot(ini) {
-    const colors = ['#7c2d12', '#0f766e', '#b45309', '#1d4ed8', '#6b21a8', '#155e75', '#854d0e'];
-    if (!ini) return colors[0];
-    const h = (ini.charCodeAt(0) + (ini.charCodeAt(1) || 0)) % colors.length;
-    return colors[h];
-}
-
-const STATUS_META = {
-    preferred: { label: 'Preferred', bg: '#dcfce7', fg: '#166534' },
-    active:    { label: 'Active',    bg: '#efece4', fg: '#3d3833' },
-    suspended: { label: 'Suspended', bg: '#fee2e2', fg: '#991b1b' },
+const STATUS_COLORS = {
+    success: { bg: '#dcfce7', fg: '#166534' },
+    secondary: { bg: '#efece4', fg: '#3d3833' },
+    danger: { bg: '#fee2e2', fg: '#991b1b' },
+    warning: { bg: '#fef3c7', fg: '#92400e' },
+    info: { bg: '#dbeafe', fg: '#1e3a8a' },
+    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
 };
-function statusMeta(k) { return STATUS_META[k] || STATUS_META.active; }
+function colorMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
+function defaultClassificationId() { return props.classifications.find(c => c.name === 'Normal')?.id ?? props.classifications[0]?.id ?? ''; }
+function defaultStatusId() { return props.statuses.find(s => s.name === 'active')?.id ?? props.statuses[0]?.id ?? ''; }
 
 const rows = computed(() => {
     let r = supplierList.value.slice();
-    if (fStatus.value !== 'all') r = r.filter(s => s.status === fStatus.value);
+    if (fClassification.value !== 'all') r = r.filter(s => s.classificationId === fClassification.value);
     if (q.value) {
         const k = q.value.toLowerCase();
-        r = r.filter(s => s.name.toLowerCase().includes(k) || s.kind.toLowerCase().includes(k) || s.id.toLowerCase().includes(k));
+        r = r.filter(s => s.name.toLowerCase().includes(k) || s.kind.toLowerCase().includes(k) || s.code.toLowerCase().includes(k));
     }
     return r.sort((a, b) => a.name.localeCompare(b.name));
 });
 
 const kpi = computed(() => ({
-    preferred: supplierList.value.filter(s => s.status === 'preferred').length,
-    active: supplierList.value.filter(s => s.status === 'active').length,
-    suspended: supplierList.value.filter(s => s.status === 'suspended').length,
+    preferred: supplierList.value.filter(s => s.classificationName === 'Preferred').length,
+    normal: supplierList.value.filter(s => s.classificationName === 'Normal').length,
+    suspended: supplierList.value.filter(s => s.classificationName === 'Suspended').length,
     noMsa: supplierList.value.filter(s => s.msa === '—').length,
 }));
 
@@ -55,10 +53,10 @@ const error = ref(null);
 const justAdded = ref(null);
 
 function freshForm() {
-    return { code: '', name: '', kind: '', status: 'active', msa: '', owner_user_id: '' };
+    return { name: '', kind: '', classification: defaultClassificationId(), status: defaultStatusId(), msa: '', contactName: '', contactPhone: '' };
 }
 const form = ref(freshForm());
-const formValid = computed(() => /^SUP-[A-Z0-9]+$/.test(form.value.code) && form.value.name.trim() && form.value.kind.trim());
+const formValid = computed(() => form.value.name.trim() && form.value.kind.trim());
 
 function openAdd() {
     form.value = freshForm();
@@ -73,12 +71,13 @@ async function addSupplier() {
     error.value = null;
     try {
         const { data } = await axios.post(route('mp.suppliers.store'), {
-            code: form.value.code.trim().toUpperCase(),
             name: form.value.name.trim(),
             kind: form.value.kind.trim(),
-            status: form.value.status,
+            classification_id: form.value.classification,
+            status_id: form.value.status,
             msa_reference: form.value.msa.trim() || null,
-            owner_user_id: form.value.owner_user_id || null,
+            contact_name: form.value.contactName.trim() || null,
+            contact_phone: form.value.contactPhone.trim() || null,
         });
         supplierList.value.unshift(data);
         justAdded.value = data.id;
@@ -87,7 +86,7 @@ async function addSupplier() {
     } catch (e) {
         error.value = e.response?.status === 403
             ? "You don't have permission to add a supplier."
-            : (e.response?.data?.errors?.code?.[0] ?? 'Could not save this supplier. Please try again.');
+            : (e.response?.data?.errors?.name?.[0] ?? 'Could not save this supplier. Please try again.');
     } finally {
         saving.value = false;
     }
@@ -127,8 +126,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <div class="cox-kpi-v mono">{{ kpi.preferred }}</div>
             </div>
             <div class="cox-kpi">
-                <div class="cox-kpi-l">Active</div>
-                <div class="cox-kpi-v mono">{{ kpi.active }}</div>
+                <div class="cox-kpi-l">Normal</div>
+                <div class="cox-kpi-v mono">{{ kpi.normal }}</div>
             </div>
             <div class="cox-kpi">
                 <div class="cox-kpi-l">Suspended</div>
@@ -147,12 +146,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <input v-model="q" placeholder="Find a supplier by name, kind or code…"/>
             </div>
             <div class="fb-sel">
-                <label>Status</label>
-                <select v-model="fStatus">
-                    <option value="all">Any status</option>
-                    <option value="preferred">Preferred</option>
-                    <option value="active">Active</option>
-                    <option value="suspended">Suspended</option>
+                <label>Classification</label>
+                <select v-model="fClassification">
+                    <option value="all">Any classification</option>
+                    <option v-for="c in classifications" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
             </div>
         </div>
@@ -164,9 +161,11 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <tr>
                         <th>Supplier</th>
                         <th>Kind</th>
+                        <th>Classification</th>
                         <th>Status</th>
                         <th>MSA</th>
-                        <th>Owner</th>
+                        <th>Contact</th>
+                        <th class="ta-r">Avg lead</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -174,23 +173,23 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <tr v-for="s in rows" :key="s.id" :class="{ 'sup-row-new': justAdded === s.id }">
                         <td>
                             <div class="sup-name">{{ s.name }}</div>
-                            <div class="sup-code mono">{{ s.id }}</div>
+                            <div class="sup-code mono">{{ s.code }}</div>
                         </td>
                         <td>{{ s.kind }}</td>
-                        <td><span class="opt-status" :style="{ background: statusMeta(s.status).bg, color: statusMeta(s.status).fg }">{{ statusMeta(s.status).label }}</span></td>
+                        <td><span class="opt-status" :style="{ background: colorMeta(s.classificationColor).bg, color: colorMeta(s.classificationColor).fg }">{{ s.classificationName || '—' }}</span></td>
+                        <td><span class="opt-status" :style="{ background: colorMeta(s.statusColor).bg, color: colorMeta(s.statusColor).fg }">{{ s.statusName || '—' }}</span></td>
                         <td class="mono">{{ s.msa }}</td>
                         <td>
-                            <div class="sup-owner">
-                                <span class="mp-avatar mp-avatar-sm" :style="{ background: fmtDot(s.owner) }">{{ s.owner }}</span>
-                                {{ personOf(s.owner).name }}
-                            </div>
+                            <div class="sup-contact">{{ s.contactName || '—' }}</div>
+                            <div v-if="s.contactPhone" class="sup-contact-phone mono">{{ s.contactPhone }}</div>
                         </td>
+                        <td class="ta-r mono">{{ s.avgLeadDays !== null ? s.avgLeadDays + ' d' : '—' }}</td>
                         <td class="ta-r">
                             <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteSupplier(s)">Remove</button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
-                        <td colspan="6" class="sup-empty">No suppliers match these filters.</td>
+                        <td colspan="8" class="sup-empty">No suppliers match these filters.</td>
                     </tr>
                 </tbody>
             </table>
@@ -216,25 +215,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <div class="skum-body">
                     <section class="skum-sec">
                         <div class="form-grid">
-                            <div class="field">
-                                <label class="field-lbl">Code</label>
-                                <input v-model="form.code" placeholder="e.g. SUP-ACME" class="mono"/>
-                                <span class="field-hint">Must start with SUP- (letters/numbers only).</span>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Status</label>
-                                <div class="sel">
-                                    <select v-model="form.status">
-                                        <option value="preferred">Preferred</option>
-                                        <option value="active">Active</option>
-                                        <option value="suspended">Suspended</option>
-                                    </select>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-                                </div>
-                            </div>
                             <div class="field" style="grid-column: span 2">
                                 <label class="field-lbl">Name</label>
                                 <input v-model="form.name" placeholder="e.g. Acme Event Services"/>
+                                <span class="field-hint">Code is generated automatically from the name.</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Kind</label>
@@ -244,15 +228,31 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 <label class="field-lbl">MSA reference</label>
                                 <input v-model="form.msa" placeholder="optional"/>
                             </div>
-                            <div class="field" style="grid-column: span 2">
-                                <label class="field-lbl">Owner</label>
+                            <div class="field">
+                                <label class="field-lbl">Classification</label>
                                 <div class="sel">
-                                    <select v-model="form.owner_user_id">
-                                        <option value="">— Unassigned —</option>
-                                        <option v-for="p in people" :key="p.initials" :value="p.id">{{ p.name }}</option>
+                                    <select v-model="form.classification">
+                                        <option v-for="c in classifications" :key="c.id" :value="c.id">{{ c.name }}</option>
                                     </select>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                                 </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-lbl">Status</label>
+                                <div class="sel">
+                                    <select v-model="form.status">
+                                        <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.name }}</option>
+                                    </select>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label class="field-lbl">Contact name</label>
+                                <input v-model="form.contactName" placeholder="optional"/>
+                            </div>
+                            <div class="field">
+                                <label class="field-lbl">Contact phone</label>
+                                <input v-model="form.contactPhone" placeholder="optional"/>
                             </div>
                         </div>
                     </section>
@@ -262,7 +262,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <div class="skum-ft-l">
                         <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
                         <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Code, name and kind are required</span>
+                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Name and kind are required</span>
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeAdd">Cancel</button>
@@ -338,17 +338,13 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mp-dt tr:last-child td { border-bottom: none; }
 .sup-name { font-weight: 500; }
 .sup-code { font-size: 11px; color: #76706a; margin-top: 2px; }
-.sup-owner { display: flex; align-items: center; gap: 8px; }
+.sup-contact { font-size: 13px; }
+.sup-contact-phone { font-size: 11px; color: #76706a; margin-top: 2px; }
 .sup-empty { text-align: center; padding: 24px; color: #76706a; }
 
 .opt-status {
     display: inline-flex; align-items: center; padding: 2px 8px;
     border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
-}
-.mp-avatar {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border-radius: 50%;
-    color: #fff; font-size: 9px; font-weight: 700; flex-shrink: 0;
 }
 
 @keyframes sup-newrow { 0%, 100% { background: transparent; } 20% { background: rgba(15,118,110,.12); } }

@@ -1,47 +1,24 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
 
 const props = defineProps({
-    requests:    Array,
-    detailId:    { type: String, default: null },
-    domains:     Array,
-    venues:      Array,
-    statuses:    Object,
-    people:      Array,
-    catalog:     { type: Array, default: () => [] },
-    suppliers:   { type: Array, default: () => [] },
-    permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
+    requests:      Array,
+    detailId:      { type: String, default: null },
+    detailData:    { type: Object, default: null },
+    detailLoading: { type: Boolean, default: false },
+    detailError:   { type: String, default: null },
+    domains:       Array,
+    venues:        Array,
+    statuses:      Object,
+    people:        Array,
+    catalog:       { type: Array, default: () => [] },
+    suppliers:     { type: Array, default: () => [] },
+    permissions:   { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
 });
 
 const emit = defineEmits(['go-to']);
 
-// ── Static data ───────────────────────────────────────────────────────────────
-const detailLines = [
-    { sku: 'OV-FL-0420', name: 'Modular Event Flooring 0.5×0.5 m', qty: 240, unit: 'm²', rate: 42,   comment: 'Per layout v3.1 — North end' },
-    { sku: 'OV-FN-2200', name: 'Heras Fence Panel 3.5 m',          qty: 18,  unit: 'ea', rate: 36,   comment: 'Crowd separation' },
-    { sku: 'LG-TN-1010', name: 'Standard Tent 10×10 m w/ Floor',   qty: 2,   unit: 'ea', rate: 5180, comment: 'Broadcaster waiting' },
-    { sku: 'LG-FN-0312', name: 'Stacking Chair – Black Vinyl',      qty: 18,  unit: 'ea', rate: 28,   comment: 'Athlete bench' },
-    { sku: 'IT-AV-0102', name: 'Samsung 75" QM75B Commercial',      qty: 4,   unit: 'ea', rate: 2950, comment: 'Run-of-show feed' },
-    { sku: 'IT-AV-0411', name: 'Shure ULXD24/SM58 Wireless',        qty: 4,   unit: 'ea', rate: 1840, comment: 'Press scrum' },
-];
-
-const auditLog = [
-    { at: 'Apr 23, 10:55', who: 'MC', verb: 'approved',         what: 'Category review',  note: 'After change order CO-001 accepted' },
-    { at: 'Apr 23, 09:40', who: 'AR', verb: 'applied change',   what: 'CO-001',           note: 'Qty 240 → 286 m², swap mic SKU' },
-    { at: 'Apr 23, 08:11', who: 'MC', verb: 'requested change', what: 'CO-001',           note: 'See diff: +46 m² flooring; +6 chairs' },
-    { at: 'Apr 22, 14:28', who: 'JK', verb: 'approved',         what: 'L1 review',        note: null },
-    { at: 'Apr 22, 11:02', who: 'SO', verb: 'commented',        what: '',                 note: 'Footprint confirmed with overlay v3.1' },
-    { at: 'Apr 22, 09:14', who: 'AR', verb: 'submitted',        what: 'v1',               note: '14 lines · $184,320' },
-    { at: 'Apr 22, 09:02', who: 'AR', verb: 'created draft',    what: '',                 note: null },
-];
-
-const approvalWorkflow = [
-    { who: 'AR', role: 'You — Venue Planner',             state: 'done',   when: 'Apr 22, 09:14', note: 'Submitted with 14 line items.' },
-    { who: 'JK', role: 'L1 — Operations Coordinator',    state: 'done',   when: 'Apr 22, 14:28', note: 'L1 review passed.' },
-    { who: 'MC', role: 'Category Lead — Overlay',         state: 'change', when: 'Apr 23, 08:11', note: 'Increase flooring 240 → 286 m².' },
-    { who: 'DV', role: 'Finance Controller (value > $50k)', state: 'now',  when: null,             note: null },
-];
 const stateStyles = {
     done:   { bg: '#dcfce7', fg: '#14532d', dot: '#166534', lbl: 'Approved' },
     now:    { bg: '#fef3c7', fg: '#92400e', dot: '#b45309', lbl: 'In review' },
@@ -51,27 +28,51 @@ const stateStyles = {
 
 // ── Local state ───────────────────────────────────────────────────────────────
 const detailTab = ref('overview');
+watch(() => props.detailId, () => { detailTab.value = 'overview'; });
 
 // ── Computed ──────────────────────────────────────────────────────────────────
+// `detailData` is fetched fresh from the DB on every click (see Index.vue's
+// openRequest); the `requests` list is only a page-load-time snapshot, so it's
+// used solely as a placeholder while the real detail is still loading.
 const detailRequest = computed(() =>
-    props.requests.find(r => r.id === props.detailId) || props.requests[0]
+    props.detailData || props.requests.find(r => r.id === props.detailId) || props.requests[0] || {}
 );
 
-const diffLines = computed(() => detailLines.map((b, i) => {
-    const a = { ...b };
-    if (i === 0) a.qty = 286;
-    if (i === 3) a.qty = 24;
-    if (i === 5) a.name = 'Shure QLXD24/SM58 Wireless (substituted)';
-    const dValue = (a.qty - b.qty) * b.rate;
-    return { ...b, after: a, dValue, changed: b.qty !== a.qty || b.name !== a.name };
-}));
+const detailLines      = computed(() => props.detailData?.lines ?? []);
+const approvalWorkflow = computed(() => props.detailData?.approvalSteps ?? []);
+const auditLog         = computed(() => props.detailData?.activity ?? []);
+const changeOrders     = computed(() => props.detailData?.changeOrders ?? []);
+const activeChangeOrder = computed(() => changeOrders.value[changeOrders.value.length - 1] ?? null);
+
+const diffLines = computed(() => {
+    const co = activeChangeOrder.value;
+    if (!co) return [];
+    return co.lines.map(l => ({
+        sku: l.sku,
+        name: l.name,
+        qtyBefore: l.qtyBefore,
+        qtyAfter: l.qtyAfter,
+        dValue: Number(l.dValue) || 0,
+        why: l.why,
+        changed: l.qtyBefore !== l.qtyAfter,
+    }));
+});
+const netChange = computed(() => activeChangeOrder.value?.delta ?? diffLines.value.reduce((sum, d) => sum + d.dValue, 0));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)  { return props.domains.find(d => d.id === id) || props.domains[0]; }
-function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
-function personOf(ini) { return props.people.find(p => p.initials === ini) || props.people[0]; }
-function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
+function domainOf(code) { return props.domains.find(d => d.code === code) || props.domains[0]; }
+function venueOf(name)  { return props.venues.find(v => v.name === name || v.short_name === name) || props.venues[0]; }
+function fmtMoney(n)    { return '$' + Number(n || 0).toLocaleString('en-US'); }
 function catalogOf(sku) { return props.catalog.find(c => c.sku === sku); }
+
+function fmtDate(s) {
+    if (!s) return '—';
+    return new Date(s.replace(' ', 'T')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function fmtDateTime(s) {
+    if (!s) return '—';
+    return new Date(s.replace(' ', 'T')).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
 
 // ── Add service option (domain managers + admins only) ───────────────────────
 function canAddServiceOption(domain) {
@@ -85,8 +86,14 @@ function onOptionAdded(option) {
 }
 
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
-function avatarColor(initials) {
-    const h = (initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % avatarColors.length;
+function initialsOf(name) {
+    if (!name) return '—';
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
+}
+function avatarColor(name) {
+    const key = initialsOf(name);
+    const h = (key.charCodeAt(0) + (key.charCodeAt(1) || 0)) % avatarColors.length;
     return avatarColors[h];
 }
 </script>
@@ -98,17 +105,17 @@ function avatarColor(initials) {
                 <button class="mp-back-btn" @click="emit('go-to', 'requests')">← Back to requests</button>
                 <h1 class="mp-page-title">
                     {{ detailRequest.title }}
-                    <span class="mono mp-detail-id">{{ detailRequest.id }}</span>
+                    <span class="mono mp-detail-id">{{ detailRequest.code }}</span>
                 </h1>
                 <div class="mp-detail-meta">
                     <span class="mp-pill" :style="{ background: statuses[detailRequest.status]?.bg, color: statuses[detailRequest.status]?.fg }">
                         <span class="mp-pill-dot" :style="{ background: statuses[detailRequest.status]?.dot }"/>
                         {{ statuses[detailRequest.status]?.label }}
                     </span>
-                    <span class="mp-dtag" :style="{ background: domainOf(detailRequest.domain).chip, color: domainOf(detailRequest.domain).color }">
-                        <b>{{ detailRequest.domain }}</b> {{ domainOf(detailRequest.domain).label }}
+                    <span class="mp-dtag" :style="{ background: domainOf(detailRequest.domain)?.chip, color: domainOf(detailRequest.domain)?.color }">
+                        <b>{{ detailRequest.domain }}</b> {{ domainOf(detailRequest.domain)?.label }}
                     </span>
-                    <span class="mp-dm-item"><span class="mp-dm-lbl">Venue</span> {{ venueOf(detailRequest.venue).name }}</span>
+                    <span class="mp-dm-item"><span class="mp-dm-lbl">Venue</span> {{ venueOf(detailRequest.venue)?.name }}</span>
                     <span class="mp-dm-item"><span class="mp-dm-lbl">Site</span> {{ detailRequest.site }}</span>
                     <span class="mp-dm-item"><span class="mp-dm-lbl">Value</span> <b class="mono">{{ fmtMoney(detailRequest.value) }}</b></span>
                 </div>
@@ -120,164 +127,163 @@ function avatarColor(initials) {
             </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="mp-tabs">
-            <button v-for="t in ['overview','items','change-order','audit']" :key="t"
-                class="mp-tab"
-                :class="{ 'mp-tab-on': detailTab === t }"
-                @click="detailTab = t"
-            >
-                {{ t === 'overview' ? 'Overview' : t === 'items' ? `Items · ${detailLines.length}` : t === 'change-order' ? 'Change order · CO-001' : 'Audit log' }}
-            </button>
-        </div>
+        <div v-if="detailLoading" class="mp-card mp-detail-status">Loading request details…</div>
+        <div v-else-if="detailError" class="mp-card mp-detail-status mp-detail-status-error">{{ detailError }}</div>
 
-        <!-- Overview tab -->
-        <div v-if="detailTab === 'overview'" class="mp-detail-grid">
-            <div class="mp-card">
-                <div class="mp-card-head"><h3 class="mp-card-title">Approval workflow</h3></div>
-                <div class="mp-apv-list">
-                    <div v-for="(step, i) in approvalWorkflow" :key="i"
-                        class="mp-apv"
-                        :class="'mp-apv-' + step.state"
-                    >
-                        <div class="mp-apv-rail">
-                            <span class="mp-apv-dot" :style="{ background: stateStyles[step.state].dot }"/>
-                        </div>
-                        <div class="mp-apv-body">
-                            <div class="mp-apv-head">
-                                <span class="mp-avatar" :style="{ background: avatarColor(step.who) }">{{ step.who }}</span>
-                                <div class="mp-apv-meta">
-                                    <div class="mp-apv-name">{{ personOf(step.who).name }}</div>
-                                    <div class="mp-apv-role">{{ step.role }}</div>
-                                </div>
-                                <span class="mp-apv-pill" :style="{ background: stateStyles[step.state].bg, color: stateStyles[step.state].fg }">
-                                    {{ stateStyles[step.state].lbl }}
-                                </span>
+        <template v-else>
+            <!-- Tabs -->
+            <div class="mp-tabs">
+                <button v-for="t in ['overview','items','change-order','audit']" :key="t"
+                    class="mp-tab"
+                    :class="{ 'mp-tab-on': detailTab === t }"
+                    @click="detailTab = t"
+                >
+                    {{ t === 'overview' ? 'Overview' : t === 'items' ? `Items · ${detailLines.length}` : t === 'change-order' ? (activeChangeOrder ? `Change order · ${activeChangeOrder.code}` : 'Change order') : 'Audit log' }}
+                </button>
+            </div>
+
+            <!-- Overview tab -->
+            <div v-if="detailTab === 'overview'" class="mp-detail-grid">
+                <div class="mp-card">
+                    <div class="mp-card-head"><h3 class="mp-card-title">Approval workflow</h3></div>
+                    <div v-if="!approvalWorkflow.length" class="mp-empty">No approval steps yet.</div>
+                    <div v-else class="mp-apv-list">
+                        <div v-for="step in approvalWorkflow" :key="step.id"
+                            class="mp-apv"
+                            :class="'mp-apv-' + step.state"
+                        >
+                            <div class="mp-apv-rail">
+                                <span class="mp-apv-dot" :style="{ background: stateStyles[step.state]?.dot }"/>
                             </div>
-                            <div v-if="step.when" class="mp-apv-when">{{ step.when }}</div>
-                            <div v-if="step.note" class="mp-apv-note">{{ step.note }}</div>
-                            <div v-if="step.state === 'now'" class="mp-apv-actions">
-                                <button class="mp-btn mp-btn-sm">Request change</button>
-                                <button class="mp-btn mp-btn-sm">Reject</button>
-                                <button class="mp-btn mp-btn-primary mp-btn-sm">Approve</button>
+                            <div class="mp-apv-body">
+                                <div class="mp-apv-head">
+                                    <span class="mp-avatar" :style="{ background: avatarColor(step.approverName) }">{{ initialsOf(step.approverName) }}</span>
+                                    <div class="mp-apv-meta">
+                                        <div class="mp-apv-name">{{ step.approverName || 'Unassigned' }}</div>
+                                        <div class="mp-apv-role">{{ step.role }}</div>
+                                    </div>
+                                    <span class="mp-apv-pill" :style="{ background: stateStyles[step.state]?.bg, color: stateStyles[step.state]?.fg }">
+                                        {{ stateStyles[step.state]?.lbl }}
+                                    </span>
+                                </div>
+                                <div v-if="step.actedAt" class="mp-apv-when">{{ fmtDateTime(step.actedAt) }}</div>
+                                <div v-if="step.note" class="mp-apv-note">{{ step.note }}</div>
+                                <div v-if="step.state === 'now'" class="mp-apv-actions">
+                                    <button class="mp-btn mp-btn-sm">Request change</button>
+                                    <button class="mp-btn mp-btn-sm">Reject</button>
+                                    <button class="mp-btn mp-btn-primary mp-btn-sm">Approve</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+                <div class="mp-card">
+                    <div class="mp-card-head"><h3 class="mp-card-title">Request summary</h3></div>
+                    <table class="mp-rollup">
+                        <tbody>
+                            <tr><td class="mp-dm-lbl">ID</td><td class="mono">{{ detailRequest.code }}</td></tr>
+                            <tr><td class="mp-dm-lbl">Submitted</td><td>{{ fmtDate(detailRequest.submittedAt) }}</td></tr>
+                            <tr><td class="mp-dm-lbl">Priority</td><td>{{ detailRequest.priority }}</td></tr>
+                            <tr><td class="mp-dm-lbl">Items</td><td class="mono">{{ detailRequest.items }}</td></tr>
+                            <tr><td class="mp-dm-lbl">Total value</td><td class="mono">{{ fmtMoney(detailRequest.value) }}</td></tr>
+                            <tr><td class="mp-dm-lbl">Owner</td><td>{{ detailRequest.owner || '—' }}</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="mp-card">
-                <div class="mp-card-head"><h3 class="mp-card-title">Request summary</h3></div>
-                <table class="mp-rollup">
+
+            <!-- Items tab -->
+            <div v-if="detailTab === 'items'" class="mp-card mp-card-flush">
+                <div v-if="!detailLines.length" class="mp-empty">No line items yet.</div>
+                <table v-else class="mp-dt">
+                    <thead><tr><th>SKU</th><th>Item</th><th class="ta-c">Qty</th><th>Unit</th><th class="ta-c">Rate</th><th class="ta-c">Total</th><th>Comment</th><th></th></tr></thead>
                     <tbody>
-                        <tr><td class="mp-dm-lbl">ID</td><td class="mono">{{ detailRequest.id }}</td></tr>
-                        <tr><td class="mp-dm-lbl">Submitted</td><td>{{ detailRequest.submitted }}</td></tr>
-                        <tr><td class="mp-dm-lbl">Priority</td><td>{{ detailRequest.priority }}</td></tr>
-                        <tr><td class="mp-dm-lbl">Items</td><td class="mono">{{ detailRequest.items }}</td></tr>
-                        <tr><td class="mp-dm-lbl">Total value</td><td class="mono">{{ fmtMoney(detailRequest.value) }}</td></tr>
-                        <tr><td class="mp-dm-lbl">Owner</td><td>{{ personOf(detailRequest.owner).name }}</td></tr>
+                        <tr v-for="l in detailLines" :key="l.id">
+                            <td class="mono">{{ l.sku }}</td>
+                            <td>{{ l.name }}</td>
+                            <td class="ta-c mono">{{ l.qty }}</td>
+                            <td class="mono">{{ l.unit }}</td>
+                            <td class="ta-c mono">{{ fmtMoney(l.rate) }}</td>
+                            <td class="ta-c mono">{{ fmtMoney(l.value) }}</td>
+                            <td>{{ l.comment }}</td>
+                            <td class="ta-r">
+                                <button
+                                    v-if="canAddServiceOption(catalogOf(l.sku)?.domain)"
+                                    class="mp-btn mp-btn-sm"
+                                    @click="showAddOptionFor = l.sku"
+                                >+ Option</button>
+                                <span v-if="addedOptions.some(o => o.sku === l.sku)" class="mp-dt-optn">
+                                    {{ addedOptions.filter(o => o.sku === l.sku).length }} added
+                                </span>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
-        </div>
 
-        <!-- Items tab -->
-        <div v-if="detailTab === 'items'" class="mp-card mp-card-flush">
-            <table class="mp-dt">
-                <thead><tr><th>SKU</th><th>Item</th><th class="ta-r">Qty</th><th>Unit</th><th class="ta-r">Rate</th><th class="ta-r">Total</th><th>Comment</th><th></th></tr></thead>
-                <tbody>
-                    <tr v-for="l in detailLines" :key="l.sku">
-                        <td class="mono">{{ l.sku }}</td>
-                        <td>{{ l.name }}</td>
-                        <td class="ta-r mono">{{ l.qty }}</td>
-                        <td class="mono">{{ l.unit }}</td>
-                        <td class="ta-r mono">{{ fmtMoney(l.rate) }}</td>
-                        <td class="ta-r mono">{{ fmtMoney(l.qty * l.rate) }}</td>
-                        <td>{{ l.comment }}</td>
-                        <td class="ta-r">
-                            <button
-                                v-if="canAddServiceOption(catalogOf(l.sku)?.domain)"
-                                class="mp-btn mp-btn-sm"
-                                @click="showAddOptionFor = l.sku"
-                            >+ Option</button>
-                            <span v-if="addedOptions.some(o => o.sku === l.sku)" class="mp-dt-optn">
-                                {{ addedOptions.filter(o => o.sku === l.sku).length }} added
-                            </span>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+            <NewServiceOptionModal
+                v-if="showAddOptionFor"
+                :catalog="catalog"
+                :suppliers="suppliers"
+                :domains="domains"
+                :locked-sku="showAddOptionFor"
+                @close="showAddOptionFor = null"
+                @add="onOptionAdded"
+            />
 
-        <NewServiceOptionModal
-            v-if="showAddOptionFor"
-            :catalog="catalog"
-            :suppliers="suppliers"
-            :domains="domains"
-            :locked-sku="showAddOptionFor"
-            @close="showAddOptionFor = null"
-            @add="onOptionAdded"
-        />
+            <!-- Change order tab -->
+            <div v-if="detailTab === 'change-order'" class="mp-card mp-card-flush">
+                <div v-if="!activeChangeOrder" class="mp-empty">No change orders have been raised for this request.</div>
+                <table v-else class="mp-diff">
+                    <thead>
+                        <tr>
+                            <th>SKU</th><th>Item</th>
+                            <th class="ta-r">Original qty</th><th class="ta-r">Proposed qty</th>
+                            <th class="ta-r">Δ value</th><th>Why</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="d in diffLines" :key="d.sku" :class="{ 'mp-diff-changed': d.changed }">
+                            <td class="mono">{{ d.sku }}</td>
+                            <td>{{ d.name }}</td>
+                            <td class="ta-r mono">{{ d.qtyBefore }}</td>
+                            <td class="ta-r mono">{{ d.qtyAfter }}</td>
+                            <td class="ta-r mono" :class="d.dValue > 0 ? 'mp-diff-pos' : d.dValue < 0 ? 'mp-diff-neg' : ''">
+                                {{ d.dValue === 0 ? '—' : (d.dValue > 0 ? '+' : '') + fmtMoney(d.dValue) }}
+                            </td>
+                            <td class="mp-diff-reason">{{ d.why }}</td>
+                        </tr>
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="4" class="ta-r">Net change</td>
+                            <td class="ta-r mono" :class="netChange > 0 ? 'mp-diff-pos' : netChange < 0 ? 'mp-diff-neg' : ''">
+                                {{ (netChange > 0 ? '+' : '') + fmtMoney(netChange) }}
+                            </td>
+                            <td/>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
 
-        <!-- Change order tab -->
-        <div v-if="detailTab === 'change-order'" class="mp-card mp-card-flush">
-            <table class="mp-diff">
-                <thead>
-                    <tr>
-                        <th>SKU</th><th>Item</th>
-                        <th class="ta-r">Original qty</th><th class="ta-r">Proposed qty</th>
-                        <th class="ta-r">Δ value</th><th>Reason</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="(d, i) in diffLines" :key="i" :class="{ 'mp-diff-changed': d.changed }">
-                        <td class="mono">{{ d.sku }}</td>
-                        <td>
-                            <div v-if="d.name !== d.after.name">
-                                <div class="mp-diff-old">{{ d.name }}</div>
-                                <div class="mp-diff-new">{{ d.after.name }}</div>
+            <!-- Audit tab -->
+            <div v-if="detailTab === 'audit'">
+                <div v-if="!auditLog.length" class="mp-empty">No activity yet.</div>
+                <ul v-else class="mp-audit">
+                    <li v-for="e in auditLog" :key="e.id" class="mp-audit-row">
+                        <div class="mp-audit-at mono">{{ fmtDateTime(e.createdAt) }}</div>
+                        <div class="mp-audit-rail"><span/></div>
+                        <div class="mp-audit-body">
+                            <div class="mp-audit-line">
+                                <span class="mp-avatar mp-avatar-sm" :style="{ background: avatarColor(e.actorName) }">{{ initialsOf(e.actorName) }}</span>
+                                <span><b>{{ e.actorName || 'System' }}</b> {{ e.verb }} <span v-if="e.subject" class="mono mp-audit-what">{{ e.subject }}</span></span>
                             </div>
-                            <span v-else>{{ d.name }}</span>
-                        </td>
-                        <td class="ta-r mono">
-                            <span v-if="d.qty !== d.after.qty" class="mp-diff-old-inline">{{ d.qty }}</span>
-                            <span v-else>{{ d.qty }}</span>
-                        </td>
-                        <td class="ta-r mono">
-                            <span v-if="d.qty !== d.after.qty" class="mp-diff-new-inline">{{ d.after.qty }}</span>
-                            <span v-else>{{ d.after.qty }}</span>
-                        </td>
-                        <td class="ta-r mono" :class="d.dValue > 0 ? 'mp-diff-pos' : d.dValue < 0 ? 'mp-diff-neg' : ''">
-                            {{ d.dValue === 0 ? '—' : (d.dValue > 0 ? '+' : '') + fmtMoney(d.dValue) }}
-                        </td>
-                        <td class="mp-diff-reason">
-                            <span v-if="i === 0">Increase footprint for broadcaster waiting pad</span>
-                            <span v-else-if="i === 3">Add 6 chairs for athlete bench</span>
-                            <span v-else-if="i === 5">Vendor substitution — equivalent specs, same rate</span>
-                        </td>
-                    </tr>
-                </tbody>
-                <tfoot>
-                    <tr><td colspan="4" class="ta-r">Net change</td><td class="ta-r mono mp-diff-pos">+$1,930</td><td/></tr>
-                </tfoot>
-            </table>
-        </div>
-
-        <!-- Audit tab -->
-        <div v-if="detailTab === 'audit'">
-            <ul class="mp-audit">
-                <li v-for="(e, i) in auditLog" :key="i" class="mp-audit-row">
-                    <div class="mp-audit-at mono">{{ e.at }}</div>
-                    <div class="mp-audit-rail"><span/></div>
-                    <div class="mp-audit-body">
-                        <div class="mp-audit-line">
-                            <span class="mp-avatar mp-avatar-sm" :style="{ background: avatarColor(e.who) }">{{ e.who }}</span>
-                            <span><b>{{ personOf(e.who).name }}</b> {{ e.verb }} <span v-if="e.what" class="mono mp-audit-what">{{ e.what }}</span></span>
+                            <div v-if="e.note" class="mp-audit-note">{{ e.note }}</div>
                         </div>
-                        <div v-if="e.note" class="mp-audit-note">{{ e.note }}</div>
-                    </div>
-                </li>
-            </ul>
-        </div>
+                    </li>
+                </ul>
+            </div>
+        </template>
     </div>
 </template>
 
@@ -311,6 +317,10 @@ function avatarColor(initials) {
 .mp-detail-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
 .mp-dm-item { font-size: 12px; color: #76706a; }
 .mp-dm-lbl { margin-right: 3px; }
+
+.mp-detail-status { font-size: 13px; color: #76706a; text-align: center; padding: 30px 20px; }
+.mp-detail-status-error { color: #991b1b; }
+.mp-empty { font-size: 13px; color: #76706a; padding: 20px; text-align: center; }
 
 .mp-tabs { display: flex; gap: 0; border-bottom: 2px solid #e8e4db; margin-bottom: 14px; }
 .mp-tab {
@@ -371,6 +381,7 @@ function avatarColor(initials) {
     color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
     padding: 10px 14px; text-align: left; white-space: nowrap;
 }
+.mp-dt th.ta-c { text-align: center; }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
 .mp-dt-optn { display: inline-block; margin-left: 8px; font-size: 11px; color: #0f766e; font-weight: 600; white-space: nowrap; }
 
@@ -399,4 +410,5 @@ function avatarColor(initials) {
 
 .mono { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
+.ta-c { text-align: center; }
 </style>

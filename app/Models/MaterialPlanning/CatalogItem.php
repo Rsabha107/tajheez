@@ -7,25 +7,27 @@ use Illuminate\Database\Eloquent\Model;
 class CatalogItem extends Model
 {
     protected $table = 'mp_catalog_items';
-    protected $primaryKey = 'sku';
-    public $incrementing = false;
-    protected $keyType = 'string';
     protected $guarded = [];
     protected $casts = ['rate' => 'decimal:2'];
 
     public function domain()
     {
-        return $this->belongsTo(Domain::class, 'domain_code', 'code');
+        return $this->belongsTo(Domain::class, 'domain_id');
     }
 
     public function serviceOptions()
     {
-        return $this->hasMany(ServiceOption::class, 'sku', 'sku');
+        return $this->hasMany(ServiceOption::class, 'catalog_item_id');
     }
 
     public function requestLines()
     {
-        return $this->hasMany(RequestLine::class, 'sku', 'sku');
+        return $this->hasMany(RequestLine::class, 'catalog_item_id');
+    }
+
+    public function getDomainCodeAttribute()
+    {
+        return $this->domain?->code;
     }
 
     /**
@@ -42,8 +44,8 @@ class CatalogItem extends Model
 
         return ServiceOption::create([
             'code' => "SO-{$this->sku}-OWN",
-            'sku' => $this->sku,
-            'supplier_code' => 'SUP-OWN',
+            'catalog_item_id' => $this->id,
+            'supplier_id' => Supplier::where('code', 'SUP-OWN')->value('id'),
             'name' => 'Own pool — event stock',
             'cost' => $this->rate,
             'lead_days' => 2,
@@ -51,7 +53,7 @@ class CatalogItem extends Model
             'capacity' => (int) round(($this->baseline ?: 40) / 6),
             'contract_reference' => null,
             'spec' => 'As catalogued — issued from secured event stock',
-            'status' => 'active',
+            'classification_id' => 2,
             'is_default' => true,
         ]);
     }

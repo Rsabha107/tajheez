@@ -5,6 +5,7 @@ namespace App\Http\Controllers\MaterialPlanning;
 use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ServiceOption;
+use App\Models\MaterialPlanning\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
@@ -22,19 +23,23 @@ class ServiceOptionController extends Controller
             'capacity' => ['nullable', 'integer', 'min:0'],
             'contract_reference' => ['nullable', 'string', 'max:60'],
             'spec' => ['nullable', 'string'],
+            'classification_id' => ['nullable', 'exists:classifications,id'],
+            'status_id' => ['nullable', 'exists:global_statuses,id'],
             'is_default' => ['nullable', 'boolean'],
         ]);
 
-        $item = CatalogItem::findOrFail($data['sku']);
+        $item = CatalogItem::where('sku', $data['sku'])->firstOrFail();
         Gate::authorize('createForItem', [ServiceOption::class, $item]);
+
+        $supplier = Supplier::where('code', $data['supplier_code'])->firstOrFail();
 
         $skuTail = substr($data['sku'], strrpos($data['sku'], '-') + 1);
         $supplierTail = substr($data['supplier_code'], -3);
 
         $option = ServiceOption::create([
             'code' => sprintf('SO-%s-%s-%d', $skuTail, $supplierTail, random_int(10, 99)),
-            'sku' => $data['sku'],
-            'supplier_code' => $data['supplier_code'],
+            'catalog_item_id' => $item->id,
+            'supplier_id' => $supplier->id,
             'name' => $data['name'],
             'cost' => $data['cost'],
             'lead_days' => $data['lead_days'] ?? 0,
@@ -42,7 +47,8 @@ class ServiceOptionController extends Controller
             'capacity' => $data['capacity'] ?? 0,
             'contract_reference' => $data['contract_reference'] ?? null,
             'spec' => $data['spec'] ?? null,
-            'status' => 'active',
+            'classification_id' => $data['classification_id'] ?? 2,
+            'status_id' => $data['status_id'] ?? 1,
             'is_default' => $data['is_default'] ?? false,
         ]);
 
@@ -62,9 +68,15 @@ class ServiceOptionController extends Controller
             'capacity' => ['sometimes', 'integer', 'min:0'],
             'contract_reference' => ['nullable', 'string', 'max:60'],
             'spec' => ['nullable', 'string'],
-            'status' => ['sometimes', 'in:preferred,active,suspended'],
+            'classification_id' => ['sometimes', 'exists:classifications,id'],
+            'status_id' => ['sometimes', 'exists:global_statuses,id'],
             'is_default' => ['sometimes', 'boolean'],
         ]);
+
+        if (isset($data['supplier_code'])) {
+            $data['supplier_id'] = Supplier::where('code', $data['supplier_code'])->value('id');
+            unset($data['supplier_code']);
+        }
 
         $serviceOption->update($data);
 
@@ -94,7 +106,12 @@ class ServiceOptionController extends Controller
             'capacity' => $option->capacity,
             'contract' => $option->contract_reference ?? '—',
             'spec' => $option->spec ?? '—',
-            'status' => $option->status,
+            'classificationId' => $option->classification_id,
+            'classificationName' => $option->classification?->name,
+            'classificationColor' => $option->classification?->color,
+            'statusId' => $option->status_id,
+            'statusName' => $option->status?->name,
+            'statusColor' => $option->status?->color,
             'isDefault' => $option->is_default,
         ];
     }

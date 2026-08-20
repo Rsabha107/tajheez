@@ -11,7 +11,7 @@ class AreaController extends Controller
 {
     public function data()
     {
-        $areas = Area::withCount('spaces')->orderBy('sort_order')->get();
+        $areas = Area::with('status')->withCount('spaces')->orderBy('sort_order')->get();
 
         return response()->json($areas->map(fn (Area $a) => $this->present($a)));
     }
@@ -25,8 +25,10 @@ class AreaController extends Controller
             'label' => ['required', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
+            'status_id' => ['sometimes', 'exists:global_statuses,id'],
         ]);
         $data['sort_order'] = $data['sort_order'] ?? 0;
+        $data['status_id'] = $data['status_id'] ?? 1;
 
         $area = Area::create($data);
 
@@ -41,6 +43,7 @@ class AreaController extends Controller
             'label' => ['sometimes', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
+            'status_id' => ['sometimes', 'exists:global_statuses,id'],
         ]);
 
         $area->update($data);
@@ -60,11 +63,15 @@ class AreaController extends Controller
     private function present(Area $area): array
     {
         return [
-            'id' => $area->code,
+            'id' => $area->id,
+            'code' => $area->code,
             'label' => $area->label,
             'description' => $area->description,
             'sortOrder' => $area->sort_order,
             'spacesCount' => $area->spaces_count ?? $area->spaces()->count(),
+            'statusId' => $area->status_id,
+            'statusName' => $area->status?->name,
+            'statusColor' => $area->status?->color,
         ];
     }
 }

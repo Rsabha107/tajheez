@@ -48,7 +48,7 @@ const recentActivity = [
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)  { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function personOf(ini) { return props.people.find(p => p.initials === ini) || props.people[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }

@@ -3,42 +3,38 @@ import { ref, computed } from 'vue';
 import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
 
 const props = defineProps({
-    catalog:        Array,
-    domains:        Array,
-    suppliers:      Array,
-    serviceOptions: Array,
-    people:         Array,
-    event:          { type: Object, default: () => ({ code: 'EVT' }) },
+    catalog:         Array,
+    domains:         Array,
+    suppliers:       Array,
+    serviceOptions:  Array,
+    classifications: { type: Array, default: () => [] },
+    event:           { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 // Local writable copy so we can optimistically add options
 const optionsList = ref([...props.serviceOptions]);
 
 // ── Filters ───────────────────────────────────────────────────────────────────
-const fSupplier = ref('all');
-const fDomain   = ref('all');
-const fStatus   = ref('all');
-const q         = ref('');
+const fSupplier       = ref('all');
+const fDomain         = ref('all');
+const fClassification = ref('all');
+const q               = ref('');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)   { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code)   { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function catalogOf(sku) { return props.catalog.find(c => c.sku === sku); }
-function supplierOf(id) { return props.suppliers.find(s => s.id === id) || props.suppliers[props.suppliers.length - 1]; }
+function supplierOf(code) { return props.suppliers.find(s => s.code === code) || props.suppliers[props.suppliers.length - 1]; }
 function fmtMoney(n)    { return '$' + Number(n).toLocaleString('en-US'); }
-function personOf(ini)  { return (props.people || []).find(p => p.initials === ini) || props.people?.[0] || { name: ini }; }
 
-const avatarColors = ['#7c2d12', '#0f766e', '#b45309', '#1d4ed8', '#6b21a8', '#155e75', '#854d0e'];
-function avatarColor(initials) {
-    const h = (initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % avatarColors.length;
-    return avatarColors[h];
-}
-
-const OPT_STATUS = {
-    preferred: { label: 'Preferred', bg: '#dcfce7', fg: '#166534' },
-    active:    { label: 'Active',    bg: '#efece4', fg: '#3d3833' },
-    suspended: { label: 'Suspended', bg: '#fee2e2', fg: '#991b1b' },
+const STATUS_COLORS = {
+    success: { bg: '#dcfce7', fg: '#166534' },
+    secondary: { bg: '#efece4', fg: '#3d3833' },
+    danger: { bg: '#fee2e2', fg: '#991b1b' },
+    warning: { bg: '#fef3c7', fg: '#92400e' },
+    info: { bg: '#dbeafe', fg: '#1e3a8a' },
+    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
 };
-function statusMeta(k) { return OPT_STATUS[k] || OPT_STATUS.active; }
+function colorMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
 function variance(cost, rate) {
     const d = cost - rate;
     if (!rate || d === 0) return { flat: true, text: 'at catalog' };
@@ -56,7 +52,7 @@ const rows = computed(() => {
     let r = all.value.slice();
     if (fSupplier.value !== 'all') r = r.filter(o => o.supplier === fSupplier.value);
     if (fDomain.value !== 'all')   r = r.filter(o => o.item.domain === fDomain.value);
-    if (fStatus.value !== 'all')   r = r.filter(o => o.status === fStatus.value);
+    if (fClassification.value !== 'all') r = r.filter(o => o.classificationId === fClassification.value);
     if (q.value) {
         const k = q.value.toLowerCase();
         r = r.filter(o =>
@@ -75,14 +71,14 @@ const avgLead = computed(() => {
     if (!all.value.length) return 0;
     return Math.round(all.value.reduce((s, o) => s + o.lead, 0) / all.value.length);
 });
-const suspendedCount = computed(() => all.value.filter(o => o.status === 'suspended').length);
+const suspendedCount = computed(() => all.value.filter(o => o.classificationName === 'Suspended').length);
 const noContractCount = computed(() =>
     all.value.filter(o => o.contract === '—' && o.supplier !== 'SUP-OWN' && o.supplier !== 'SUP-ITX').length
 );
 
 const suppliersRollup = computed(() =>
     props.suppliers.map(s => {
-        const mine = all.value.filter(o => o.supplier === s.id);
+        const mine = all.value.filter(o => o.supplier === s.code);
         const lead = mine.length ? Math.round(mine.reduce((a, o) => a + o.lead, 0) / mine.length) : 0;
         return { ...s, count: mine.length, lead };
     })
@@ -98,7 +94,7 @@ function closeAdd() { showAdd.value = false; }
 function onOptionAdded(option) {
     optionsList.value.unshift(option);
     justAdded.value = option.id;
-    fSupplier.value = 'all'; fDomain.value = 'all'; fStatus.value = 'all'; q.value = '';
+    fSupplier.value = 'all'; fDomain.value = 'all'; fClassification.value = 'all'; q.value = '';
     closeAdd();
     setTimeout(() => { justAdded.value = null; }, 2600);
 }
@@ -151,23 +147,21 @@ function onOptionAdded(option) {
                 <label>Supplier</label>
                 <select v-model="fSupplier">
                     <option value="all">All suppliers</option>
-                    <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    <option v-for="s in suppliers" :key="s.id" :value="s.code">{{ s.name }}</option>
                 </select>
             </div>
             <div class="fb-sel">
                 <label>Domain</label>
                 <select v-model="fDomain">
                     <option value="all">All</option>
-                    <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
+                    <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
                 </select>
             </div>
             <div class="fb-sel">
-                <label>Status</label>
-                <select v-model="fStatus">
-                    <option value="all">Any status</option>
-                    <option value="preferred">Preferred</option>
-                    <option value="active">Active</option>
-                    <option value="suspended">Suspended</option>
+                <label>Classification</label>
+                <select v-model="fClassification">
+                    <option value="all">Any classification</option>
+                    <option v-for="c in classifications" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
             </div>
         </div>
@@ -185,7 +179,7 @@ function onOptionAdded(option) {
                         <th class="ta-r">Lead</th>
                         <th>SLA</th>
                         <th class="ta-r">Cap / venue</th>
-                        <th>Status</th>
+                        <th>Classification</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -213,7 +207,7 @@ function onOptionAdded(option) {
                         <td class="ta-r mono">{{ o.lead }} d</td>
                         <td class="opt-sla">{{ o.sla }}</td>
                         <td class="ta-r mono">{{ o.capacity || '—' }}</td>
-                        <td><span class="opt-status" :style="{ background: statusMeta(o.status).bg, color: statusMeta(o.status).fg }">{{ statusMeta(o.status).label }}</span></td>
+                        <td><span class="opt-status" :style="{ background: colorMeta(o.classificationColor).bg, color: colorMeta(o.classificationColor).fg }">{{ o.classificationName || '—' }}</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -227,7 +221,7 @@ function onOptionAdded(option) {
                 <div class="mp-card-sub">Framework agreements in force for {{ event.code }}</div>
             </div>
             <ul class="opt-suplist">
-                <li v-for="s in suppliersRollup" :key="s.id" class="opt-suprow" :class="{ 'opt-suprow-off': s.status === 'suspended' }">
+                <li v-for="s in suppliersRollup" :key="s.id" class="opt-suprow" :class="{ 'opt-suprow-off': s.classificationName === 'Suspended' }">
                     <div class="opt-suprow-l">
                         <div class="opt-sup">{{ s.name }}</div>
                         <div class="opt-sup-sub">{{ s.kind }} · <span class="mono">{{ s.msa }}</span></div>
@@ -235,10 +229,10 @@ function onOptionAdded(option) {
                     <div class="opt-supstat mono">{{ s.count }} option{{ s.count === 1 ? '' : 's' }}</div>
                     <div class="opt-supstat mono">{{ s.lead ? s.lead + ' d avg lead' : '—' }}</div>
                     <div class="opt-supown">
-                        <span class="mp-avatar mp-avatar-sm" :style="{ background: avatarColor(s.owner) }">{{ s.owner }}</span>
-                        {{ personOf(s.owner).name }}
+                        {{ s.contactName || '—' }}
+                        <span v-if="s.contactPhone" class="opt-supown-phone mono">{{ s.contactPhone }}</span>
                     </div>
-                    <span class="opt-status" :style="{ background: statusMeta(s.status).bg, color: statusMeta(s.status).fg }">{{ statusMeta(s.status).label }}</span>
+                    <span class="opt-status" :style="{ background: colorMeta(s.classificationColor).bg, color: colorMeta(s.classificationColor).fg }">{{ s.classificationName || '—' }}</span>
                 </li>
             </ul>
         </div>
@@ -359,14 +353,8 @@ function onOptionAdded(option) {
 .opt-suprow:last-child { border-bottom: none; }
 .opt-suprow-off { opacity: .55; }
 .opt-supstat { font-size: 12.5px; color: #76706a; }
-.opt-supown { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #1a1614; }
-
-.mp-avatar {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 28px; height: 28px; border-radius: 50%;
-    color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
-}
-.mp-avatar-sm { width: 20px; height: 20px; font-size: 9px; }
+.opt-supown { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: #1a1614; }
+.opt-supown-phone { font-size: 11px; color: #76706a; }
 
 .mp-dtag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 600; }
 

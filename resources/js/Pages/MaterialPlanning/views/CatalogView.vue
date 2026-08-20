@@ -38,7 +38,7 @@ function refreshCatalog() {
 
 // ── Derived ───────────────────────────────────────────────────────────────────
 const facets = computed(() =>
-    props.domains.map(d => ({ ...d, count: catalogItems.value.filter(c => c.domain === d.id).length }))
+    props.domains.map(d => ({ ...d, count: catalogItems.value.filter(c => c.domain === d.code).length }))
 );
 
 const filteredCatalog = computed(() => {
@@ -61,14 +61,14 @@ const filteredCatalog = computed(() => {
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id)  { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code) { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 function stockPct(it)  { return Math.min(100, (it.stock / it.baseline) * 100); }
 function stockColor(it) {
     const p = stockPct(it) / 100;
     return p > 0.8 ? '#166534' : p > 0.5 ? '#b45309' : '#991b1b';
 }
-function supplierOf(id) { return props.suppliers.find(s => s.id === id) || props.suppliers[props.suppliers.length - 1] || { name: id }; }
+function supplierOf(code) { return props.suppliers.find(s => s.code === code) || props.suppliers[props.suppliers.length - 1] || { name: code }; }
 
 // ── Row expand — service options behind each SKU ─────────────────────────────
 const openSku = ref(null);
@@ -83,12 +83,15 @@ function defaultOptionFor(sku) {
     return opts.find(o => o.isDefault) || opts[0] || null;
 }
 
-const OPT_STATUS = {
-    preferred: { label: 'Preferred', bg: '#dcfce7', fg: '#166534' },
-    active:    { label: 'Active',    bg: '#efece4', fg: '#3d3833' },
-    suspended: { label: 'Suspended', bg: '#fee2e2', fg: '#991b1b' },
+const STATUS_COLORS = {
+    success: { bg: '#dcfce7', fg: '#166534' },
+    secondary: { bg: '#efece4', fg: '#3d3833' },
+    danger: { bg: '#fee2e2', fg: '#991b1b' },
+    warning: { bg: '#fef3c7', fg: '#92400e' },
+    info: { bg: '#dbeafe', fg: '#1e3a8a' },
+    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
 };
-function statusMeta(k) { return OPT_STATUS[k] || OPT_STATUS.active; }
+function colorMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
 function variance(cost, rate) {
     const d = cost - rate;
     if (!rate || d === 0) return { flat: true, text: 'at catalog' };
@@ -203,8 +206,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <button
                         v-for="d in facets" :key="d.id"
                         class="cat-facet"
-                        :class="{ 'cat-facet-on': catDomain === d.id }"
-                        @click="catDomain = d.id"
+                        :class="{ 'cat-facet-on': catDomain === d.code }"
+                        @click="catDomain = d.code"
                     >
                         <span class="cat-facet-l">
                             <span class="cat-facet-sw" :style="{ background: d.color }"></span>
@@ -326,7 +329,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                                 <thead>
                                                     <tr>
                                                         <th>Option</th><th>Supplier</th><th class="ta-r">Unit cost</th><th class="ta-r">vs catalog</th>
-                                                        <th class="ta-r">Lead</th><th>SLA</th><th class="ta-r">Cap / venue</th><th>Contract</th><th>Status</th>
+                                                        <th class="ta-r">Lead</th><th>SLA</th><th class="ta-r">Cap / venue</th><th>Contract</th><th>Classification</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -345,7 +348,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                                         <td class="opt-sla">{{ o.sla }}</td>
                                                         <td class="ta-r mono">{{ o.capacity || '—' }}</td>
                                                         <td class="mono opt-sup-sub">{{ o.contract }}</td>
-                                                        <td><span class="opt-status" :style="{ background: statusMeta(o.status).bg, color: statusMeta(o.status).fg }">{{ statusMeta(o.status).label }}</span></td>
+                                                        <td><span class="opt-status" :style="{ background: colorMeta(o.classificationColor).bg, color: colorMeta(o.classificationColor).fg }">{{ o.classificationName || '—' }}</span></td>
                                                     </tr>
                                                     <tr v-if="!optionsFor(it.sku).length">
                                                         <td colspan="9" class="cat-exp-empty">No service options registered for this SKU yet.</td>
@@ -424,9 +427,9 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <label class="field-lbl">Domain</label>
                             <div class="skum-domains">
                                 <button v-for="d in domains" :key="d.id" type="button"
-                                    class="skum-dom" :class="{ 'skum-dom-on': skuForm.domain === d.id }"
-                                    :style="skuForm.domain === d.id ? { borderColor: d.color, background: d.chip } : {}"
-                                    @click="skuForm.domain = d.id">
+                                    class="skum-dom" :class="{ 'skum-dom-on': skuForm.domain === d.code }"
+                                    :style="skuForm.domain === d.code ? { borderColor: d.color, background: d.chip } : {}"
+                                    @click="skuForm.domain = d.code">
                                     <span class="skum-dom-top">
                                         <span class="skum-dom-sw" :style="{ background: d.color }"></span>
                                         <span class="skum-dom-lbl">{{ d.label }}</span>

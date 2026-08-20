@@ -20,11 +20,13 @@ class RequestLineController extends Controller
             'service_option_id' => ['nullable', 'exists:mp_service_options,id'],
         ]);
 
-        $item = CatalogItem::findOrFail($data['sku']);
+        $item = CatalogItem::where('sku', $data['sku'])->firstOrFail();
         Gate::authorize('createForRequest', [RequestLine::class, $materialRequest, $item]);
 
+        unset($data['sku']);
         $line = $materialRequest->lines()->create([
             ...$data,
+            'catalog_item_id' => $item->id,
             'rate_snapshot' => $item->rate,
         ]);
 

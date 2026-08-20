@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Classification;
 use App\Models\Ems\Event;
 use App\Models\Ems\Venue;
+use App\Models\GlobalStatus;
 use App\Models\MaterialPlanning\Area;
 use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ChangeOrder;
 use App\Models\MaterialPlanning\Domain;
+use App\Models\MaterialPlanning\ItemGroup;
+use App\Models\MaterialPlanning\ItemSubgroup;
 use App\Models\MaterialPlanning\MaterialRequest;
 use App\Models\MaterialPlanning\ServiceOption;
 use App\Models\MaterialPlanning\Space;
@@ -47,15 +51,21 @@ class MaterialPlanningController extends Controller
             'managedDomain' => $user?->managed_domain,
         ];
 
-        $domains = Domain::orderBy('sort_order')->get();
+        $domains = Domain::with('status')->withCount('itemGroups')->orderBy('sort_order')->get();
         $domainsByCode = $domains->keyBy('code');
 
-        $areas = Area::withCount('spaces')->orderBy('sort_order')->get();
-        $spaces = Space::with('area')->orderBy('name')->get();
+        $areas = Area::with('status')->withCount('spaces')->orderBy('sort_order')->get();
+        $spaces = Space::with(['area', 'status'])->orderBy('name')->get();
 
-        $suppliers = Supplier::with('owner')->orderBy('name')->get();
+        $itemGroups = ItemGroup::with(['domain', 'status'])->withCount('subgroups')->orderBy('sort_order')->get();
+        $itemSubgroups = ItemSubgroup::with(['group', 'status'])->orderBy('name')->get();
+
+        $entityStatuses = GlobalStatus::where('is_active', 1)->get();
+        $classifications = Classification::where('is_active', 1)->get();
+
+        $suppliers = Supplier::with(['classification', 'status'])->withAvg('serviceOptions', 'lead_days')->orderBy('name')->get();
         $catalogItems = CatalogItem::orderBy('sku')->get();
-        $serviceOptions = ServiceOption::orderBy('id')->get();
+        $serviceOptions = ServiceOption::with(['classification', 'status'])->orderBy('id')->get();
 
         $requests = MaterialRequest::with(['venue', 'owner', 'lines.catalogItem'])->orderByDesc('id')->get();
         $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.supplier'])
@@ -67,7 +77,6 @@ class MaterialPlanningController extends Controller
         $referencedUserIds = collect()
             ->merge($requests->pluck('owner_user_id'))
             ->merge($changeOrders->pluck('raised_by_user_id'))
-            ->merge($suppliers->pluck('owner_user_id'))
             ->filter()
             ->unique();
         $roleBasedUserIds = User::where(function ($q) {
@@ -101,6 +110,7 @@ class MaterialPlanningController extends Controller
             ] : null,
 
             'venues' => Venue::orderBy('title')->get()->map(fn (Venue $v) => [
+                'id' => $v->id,
                 'code' => $v->short_name,
                 'name' => $v->title,
                 'city' => $v->city,
@@ -108,19 +118,29 @@ class MaterialPlanningController extends Controller
             ])->values()->all(),
 
             'domains' => $domains->map(fn (Domain $d) => [
-                'id' => $d->code,
+                'id' => $d->id,
+                'code' => $d->code,
                 'label' => $d->label,
                 'color' => $d->color,
                 'chip' => $d->chip,
                 'desc' => $d->description,
+                'sortOrder' => $d->sort_order,
+                'itemGroupsCount' => $d->item_groups_count,
+                'statusId' => $d->status_id,
+                'statusName' => $d->status?->name,
+                'statusColor' => $d->status?->color,
             ])->values()->all(),
 
             'areas' => $areas->map(fn (Area $a) => [
-                'id' => $a->code,
+                'id' => $a->id,
+                'code' => $a->code,
                 'label' => $a->label,
                 'description' => $a->description,
                 'sortOrder' => $a->sort_order,
                 'spacesCount' => $a->spaces_count,
+                'statusId' => $a->status_id,
+                'statusName' => $a->status?->name,
+                'statusColor' => $a->status?->color,
             ])->values()->all(),
 
             'spaces' => $spaces->map(fn (Space $s) => [
@@ -128,8 +148,49 @@ class MaterialPlanningController extends Controller
                 'code' => $s->code,
                 'name' => $s->name,
                 'description' => $s->description,
-                'area' => $s->area_code,
+                'area' => $s->area_id,
                 'areaLabel' => $s->area?->label,
+                'statusId' => $s->status_id,
+                'statusName' => $s->status?->name,
+                'statusColor' => $s->status?->color,
+            ])->values()->all(),
+
+            'itemGroups' => $itemGroups->map(fn (ItemGroup $g) => [
+                'id' => $g->id,
+                'code' => $g->code,
+                'domain' => $g->domain_id,
+                'domainLabel' => $g->domain?->label,
+                'label' => $g->label,
+                'description' => $g->description,
+                'sortOrder' => $g->sort_order,
+                'subgroupsCount' => $g->subgroups_count,
+                'statusId' => $g->status_id,
+                'statusName' => $g->status?->name,
+                'statusColor' => $g->status?->color,
+            ])->values()->all(),
+
+            'itemSubgroups' => $itemSubgroups->map(fn (ItemSubgroup $s) => [
+                'id' => $s->id,
+                'code' => $s->code,
+                'name' => $s->name,
+                'description' => $s->description,
+                'group' => $s->group_id,
+                'groupLabel' => $s->group?->label,
+                'statusId' => $s->status_id,
+                'statusName' => $s->status?->name,
+                'statusColor' => $s->status?->color,
+            ])->values()->all(),
+
+            'entityStatuses' => $entityStatuses->map(fn (GlobalStatus $s) => [
+                'id' => $s->id,
+                'name' => $s->name,
+                'color' => $s->color,
+            ])->values()->all(),
+
+            'classifications' => $classifications->map(fn (Classification $c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'color' => $c->color,
             ])->values()->all(),
 
             'statuses' => self::STATUSES,
@@ -165,12 +226,22 @@ class MaterialPlanningController extends Controller
             ])->values()->all(),
 
             'suppliers' => $suppliers->map(fn (Supplier $s) => [
-                'id' => $s->code,
+                'id' => $s->id,
+                'code' => $s->code,
                 'name' => $s->name,
                 'kind' => $s->kind,
-                'status' => $s->status,
+                'classificationId' => $s->classification_id,
+                'classificationName' => $s->classification?->name,
+                'classificationColor' => $s->classification?->color,
+                'statusId' => $s->status_id,
+                'statusName' => $s->status?->name,
+                'statusColor' => $s->status?->color,
                 'msa' => $s->msa_reference ?? '—',
-                'owner' => $s->owner?->initials,
+                'contactName' => $s->contact_name,
+                'contactPhone' => $s->contact_phone,
+                'avgLeadDays' => $s->service_options_avg_lead_days !== null
+                    ? (int) round($s->service_options_avg_lead_days)
+                    : null,
             ])->values()->all(),
 
             'serviceOptions' => $serviceOptions->map(fn (ServiceOption $o) => [
@@ -184,7 +255,12 @@ class MaterialPlanningController extends Controller
                 'capacity' => $o->capacity,
                 'contract' => $o->contract_reference ?? '—',
                 'spec' => $o->spec ?? '—',
-                'status' => $o->status,
+                'classificationId' => $o->classification_id,
+                'classificationName' => $o->classification?->name,
+                'classificationColor' => $o->classification?->color,
+                'statusId' => $o->status_id,
+                'statusName' => $o->status?->name,
+                'statusColor' => $o->status?->color,
                 'isDefault' => $o->is_default,
             ])->values()->all(),
 

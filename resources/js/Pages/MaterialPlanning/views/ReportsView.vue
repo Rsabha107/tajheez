@@ -15,7 +15,7 @@ const domainRollup = [
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(id) { return props.domains.find(d => d.id === id) || props.domains[0]; }
+function domainOf(code) { return props.domains.find(d => d.code === code) || props.domains[0]; }
 </script>
 
 <template>

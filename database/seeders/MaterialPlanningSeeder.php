@@ -8,6 +8,8 @@ use App\Models\MaterialPlanning\Area;
 use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ChangeOrder;
 use App\Models\MaterialPlanning\Domain;
+use App\Models\MaterialPlanning\ItemGroup;
+use App\Models\MaterialPlanning\ItemSubgroup;
 use App\Models\MaterialPlanning\MaterialRequest;
 use App\Models\MaterialPlanning\ServiceOption;
 use App\Models\MaterialPlanning\Space;
@@ -43,8 +45,9 @@ class MaterialPlanningSeeder extends Seeder
             $people = $this->seedPeople();
             $this->seedDomains();
             $this->seedAreasAndSpaces();
+            $this->seedItemGroupsAndSubgroups();
             $catalog = $this->seedCatalog();
-            $this->seedSuppliers($people);
+            $this->seedSuppliers();
             $this->seedServiceOptions($catalog);
             $requests = $this->seedRequests($catalog, $venueIds, $people, $event->id);
             $this->seedChangeOrders($requests, $catalog, $people);
@@ -115,6 +118,7 @@ class MaterialPlanningSeeder extends Seeder
         foreach ($areas as $row) {
             Area::updateOrCreate(['code' => $row['code']], $row);
         }
+        $areasByCode = Area::pluck('id', 'code');
 
         $spaces = [
             ['code' => '3.3.0', 'area_code' => 'MEDIA',     'name' => 'Mixed Zone',            'description' => 'Post-match athlete/media interaction zone'],
@@ -130,7 +134,75 @@ class MaterialPlanningSeeder extends Seeder
             ['code' => '5.2.0', 'area_code' => 'WORKFORCE', 'name' => 'Accreditation Centre',  'description' => 'Accreditation issuance and support'],
         ];
         foreach ($spaces as $row) {
+            $areaCode = $row['area_code'];
+            unset($row['area_code']);
+            $row['area_id'] = $areasByCode[$areaCode];
             Space::updateOrCreate(['code' => $row['code']], $row);
+        }
+    }
+
+    /**
+     * Mirrors the group/sub strings already used on catalog items (see
+     * seedCatalog() below), so the Item Groups/Subgroups admin screens have
+     * data consistent with what's actually on the catalog.
+     */
+    private function seedItemGroupsAndSubgroups(): void
+    {
+        $domainsByCode = Domain::pluck('id', 'code');
+
+        $groups = [
+            ['code' => 'IT-NETWORK',     'domain' => 'IT',  'label' => 'Network',    'sort_order' => 1],
+            ['code' => 'IT-AV',          'domain' => 'IT',  'label' => 'AV',         'sort_order' => 2],
+            ['code' => 'IT-DEVICES',     'domain' => 'IT',  'label' => 'Devices',    'sort_order' => 3],
+            ['code' => 'LOG-TENTS',      'domain' => 'LOG', 'label' => 'Tents',      'sort_order' => 1],
+            ['code' => 'LOG-FURNITURE',  'domain' => 'LOG', 'label' => 'Furniture',  'sort_order' => 2],
+            ['code' => 'LOG-SIGNAGE',    'domain' => 'LOG', 'label' => 'Signage',    'sort_order' => 3],
+            ['code' => 'PWR-GENERATORS', 'domain' => 'PWR', 'label' => 'Generators', 'sort_order' => 1],
+            ['code' => 'PWR-DISTRO',     'domain' => 'PWR', 'label' => 'Distro',     'sort_order' => 2],
+            ['code' => 'PWR-CABLING',    'domain' => 'PWR', 'label' => 'Cabling',    'sort_order' => 3],
+            ['code' => 'OVR-FLOORING',   'domain' => 'OVR', 'label' => 'Flooring',   'sort_order' => 1],
+            ['code' => 'OVR-FENCING',    'domain' => 'OVR', 'label' => 'Fencing',    'sort_order' => 2],
+            ['code' => 'OVR-STRUCTURES', 'domain' => 'OVR', 'label' => 'Structures', 'sort_order' => 3],
+            ['code' => 'FFE-FURNITURE',  'domain' => 'FFE', 'label' => 'Furniture',  'sort_order' => 1],
+            ['code' => 'FFE-FITTINGS',   'domain' => 'FFE', 'label' => 'Fittings',   'sort_order' => 2],
+        ];
+
+        $groupIds = [];
+        foreach ($groups as $row) {
+            $domainCode = $row['domain'];
+            unset($row['domain']);
+            $row['domain_id'] = $domainsByCode[$domainCode];
+            $group = ItemGroup::updateOrCreate(['code' => $row['code']], $row);
+            $groupIds[$group->code] = $group->id;
+        }
+
+        $subgroups = [
+            ['code' => 'IT-NETWORK-SW',     'group' => 'IT-NETWORK',      'name' => 'Switches'],
+            ['code' => 'IT-NETWORK-AP',     'group' => 'IT-NETWORK',      'name' => 'Access Points'],
+            ['code' => 'IT-NETWORK-CONN',   'group' => 'IT-NETWORK',      'name' => 'Connectivity'],
+            ['code' => 'IT-AV-DISPLAYS',    'group' => 'IT-AV',           'name' => 'Displays'],
+            ['code' => 'IT-AV-MICS',        'group' => 'IT-AV',           'name' => 'Microphones'],
+            ['code' => 'IT-DEV-LAPTOPS',    'group' => 'IT-DEVICES',      'name' => 'Laptops'],
+            ['code' => 'IT-DEV-TABLETS',    'group' => 'IT-DEVICES',      'name' => 'Tablets'],
+            ['code' => 'LOG-TENTS-STRUCT',  'group' => 'LOG-TENTS',       'name' => 'Structures'],
+            ['code' => 'LOG-FURN-SEATING',  'group' => 'LOG-FURNITURE',   'name' => 'Seating'],
+            ['code' => 'LOG-FURN-TABLES',   'group' => 'LOG-FURNITURE',   'name' => 'Tables'],
+            ['code' => 'LOG-SIGN-WAY',      'group' => 'LOG-SIGNAGE',     'name' => 'Wayfinding'],
+            ['code' => 'PWR-GEN-DIESEL',    'group' => 'PWR-GENERATORS',  'name' => 'Diesel'],
+            ['code' => 'PWR-DIST-PANELS',   'group' => 'PWR-DISTRO',      'name' => 'Panels'],
+            ['code' => 'PWR-CAB-POWER',     'group' => 'PWR-CABLING',     'name' => 'Power Cable'],
+            ['code' => 'OVR-FLOOR-MODULAR', 'group' => 'OVR-FLOORING',    'name' => 'Modular'],
+            ['code' => 'OVR-FENCE-HERAS',   'group' => 'OVR-FENCING',     'name' => 'Heras'],
+            ['code' => 'OVR-STRUCT-BLCHR',  'group' => 'OVR-STRUCTURES',  'name' => 'Bleachers'],
+            ['code' => 'FFE-FURN-LOUNGE',   'group' => 'FFE-FURNITURE',   'name' => 'Lounge'],
+            ['code' => 'FFE-FIT-LIGHTING',  'group' => 'FFE-FITTINGS',    'name' => 'Lighting'],
+        ];
+
+        foreach ($subgroups as $row) {
+            $groupCode = $row['group'];
+            unset($row['group']);
+            $row['group_id'] = $groupIds[$groupCode];
+            ItemSubgroup::updateOrCreate(['code' => $row['code']], $row);
         }
     }
 
@@ -162,31 +234,36 @@ class MaterialPlanningSeeder extends Seeder
             ['sku' => 'FE-FT-0044', 'domain_code' => 'FFE', 'group' => 'Fittings',   'sub' => 'Lighting',      'name' => 'Standing Floor Lamp, brass',         'unit' => 'ea',       'rate' => 140,   'stock' => 160, 'baseline' => 200],
         ];
 
+        $domainsByCode = Domain::pluck('id', 'code');
+
         $items = [];
         foreach ($rows as $row) {
+            $domainCode = $row['domain_code'];
+            unset($row['domain_code']);
+            $row['domain_id'] = $domainsByCode[$domainCode];
             $items[$row['sku']] = CatalogItem::updateOrCreate(['sku' => $row['sku']], $row);
         }
         return $items;
     }
 
-    private function seedSuppliers(array $people): void
+    private function seedSuppliers(): void
     {
         $rows = [
-            ['code' => 'SUP-VOD', 'name' => 'Vodafone Business',     'kind' => 'Telecom',             'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-VOD', 'owner' => 'JK'],
-            ['code' => 'SUP-OOR', 'name' => 'Ooredoo Enterprise',    'kind' => 'Telecom',             'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-OOR', 'owner' => 'JK'],
-            ['code' => 'SUP-DEL', 'name' => 'Dell Technologies',     'kind' => 'IT hardware',         'status' => 'active',    'msa_reference' => 'MSA-FIC25-DEL', 'owner' => 'JK'],
-            ['code' => 'SUP-INS', 'name' => 'Insight Event Rentals', 'kind' => 'IT & FF&E rental',    'status' => 'active',    'msa_reference' => 'MSA-FIC25-INS', 'owner' => 'LH'],
-            ['code' => 'SUP-GES', 'name' => 'GES Event Services',    'kind' => 'Overlay & furniture', 'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-GES', 'owner' => 'MC'],
-            ['code' => 'SUP-LOX', 'name' => 'Losberger De Boer',     'kind' => 'Structures',          'status' => 'active',    'msa_reference' => 'MSA-FIC25-LOX', 'owner' => 'MC'],
-            ['code' => 'SUP-AGG', 'name' => 'Aggreko',               'kind' => 'Power',               'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-AGG', 'owner' => 'TN'],
-            ['code' => 'SUP-ALG', 'name' => 'Al Ghurair Rentals',    'kind' => 'Furniture & plant',   'status' => 'suspended', 'msa_reference' => 'MSA-FIC25-ALG', 'owner' => 'LH'],
-            ['code' => 'SUP-ITX', 'name' => 'Internal IT Pool',      'kind' => 'In-house',            'status' => 'active',    'msa_reference' => null,            'owner' => 'JK'],
-            ['code' => 'SUP-OWN', 'name' => 'Tajheez Own Pool',      'kind' => 'In-house',            'status' => 'active',    'msa_reference' => null,            'owner' => 'LH'],
+            ['code' => 'SUP-VOD', 'name' => 'Vodafone Business',     'kind' => 'Telecom',             'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-VOD', 'contact_name' => 'Yousef Al-Sada',    'contact_phone' => '+974 5512 3401'],
+            ['code' => 'SUP-OOR', 'name' => 'Ooredoo Enterprise',    'kind' => 'Telecom',             'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-OOR', 'contact_name' => 'Fatima Al-Kuwari',  'contact_phone' => '+974 5512 3402'],
+            ['code' => 'SUP-DEL', 'name' => 'Dell Technologies',     'kind' => 'IT hardware',         'status' => 'active',    'msa_reference' => 'MSA-FIC25-DEL', 'contact_name' => 'Ryan Fitzgerald',   'contact_phone' => '+974 5512 3403'],
+            ['code' => 'SUP-INS', 'name' => 'Insight Event Rentals', 'kind' => 'IT & FF&E rental',    'status' => 'active',    'msa_reference' => 'MSA-FIC25-INS', 'contact_name' => 'Priya Nair',        'contact_phone' => '+974 5512 3404'],
+            ['code' => 'SUP-GES', 'name' => 'GES Event Services',    'kind' => 'Overlay & furniture', 'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-GES', 'contact_name' => 'Marco Bianchi',     'contact_phone' => '+974 5512 3405'],
+            ['code' => 'SUP-LOX', 'name' => 'Losberger De Boer',     'kind' => 'Structures',          'status' => 'active',    'msa_reference' => 'MSA-FIC25-LOX', 'contact_name' => 'Sven Hendricks',    'contact_phone' => '+974 5512 3406'],
+            ['code' => 'SUP-AGG', 'name' => 'Aggreko',               'kind' => 'Power',               'status' => 'preferred', 'msa_reference' => 'MSA-FIC25-AGG', 'contact_name' => 'Callum Reid',       'contact_phone' => '+974 5512 3407'],
+            ['code' => 'SUP-ALG', 'name' => 'Al Ghurair Rentals',    'kind' => 'Furniture & plant',   'status' => 'suspended', 'msa_reference' => 'MSA-FIC25-ALG', 'contact_name' => 'Hassan Al-Ghurair', 'contact_phone' => '+974 5512 3408'],
+            ['code' => 'SUP-ITX', 'name' => 'Internal IT Pool',      'kind' => 'In-house',            'status' => 'active',    'msa_reference' => null,            'contact_name' => 'Jordan Kim',        'contact_phone' => '+974 5512 3409'],
+            ['code' => 'SUP-OWN', 'name' => 'Tajheez Own Pool',      'kind' => 'In-house',            'status' => 'active',    'msa_reference' => null,            'contact_name' => 'Lukas Hofer',       'contact_phone' => '+974 5512 3410'],
         ];
+        $classificationByStatus = ['preferred' => 1, 'active' => 2, 'suspended' => 3];
         foreach ($rows as $row) {
-            $owner = $row['owner'];
-            unset($row['owner']);
-            $row['owner_user_id'] = $people[$owner]->id;
+            $row['classification_id'] = $classificationByStatus[$row['status']];
+            unset($row['status']);
             Supplier::updateOrCreate(['code' => $row['code']], $row);
         }
     }
@@ -218,7 +295,16 @@ class MaterialPlanningSeeder extends Seeder
             ['code' => 'SO-0101-GES', 'sku' => 'FE-FN-0101', 'name' => 'Lounge set rental',          'supplier_code' => 'SUP-GES', 'cost' => 480,   'lead_days' => 14, 'sla' => 'Replacement within 48h',    'capacity' => 40,   'contract_reference' => 'CTR-FIC25-GES-021', 'spec' => 'Charcoal linen, fire-certified, delivered dressed',             'status' => 'active', 'is_default' => true],
             ['code' => 'SO-0101-INS', 'sku' => 'FE-FN-0101', 'name' => 'Lounge set — value tier',    'supplier_code' => 'SUP-INS', 'cost' => 395,   'lead_days' => 10, 'sla' => 'Replacement within 72h',    'capacity' => 60,   'contract_reference' => 'CTR-FIC25-INS-005', 'spec' => 'Equivalent frame, grey weave, delivered flat-packed',           'status' => 'active'],
         ];
+        $suppliersByCode = Supplier::pluck('id', 'code');
+        $classificationByStatus = ['preferred' => 1, 'active' => 2, 'suspended' => 3];
         foreach ($rows as $row) {
+            $sku = $row['sku'];
+            $supplierCode = $row['supplier_code'];
+            unset($row['sku'], $row['supplier_code']);
+            $row['catalog_item_id'] = $catalog[$sku]->id;
+            $row['supplier_id'] = $suppliersByCode[$supplierCode];
+            $row['classification_id'] = $classificationByStatus[$row['status']];
+            unset($row['status']);
             ServiceOption::updateOrCreate(['code' => $row['code']], $row);
         }
 
@@ -285,7 +371,7 @@ class MaterialPlanningSeeder extends Seeder
                     $item = $catalog[$l['sku']];
                     $option = $item->serviceOptions()->where('is_default', true)->first();
                     $request->lines()->create([
-                        'sku' => $item->sku, 'qty' => $l['qty'], 'rate_snapshot' => $item->rate,
+                        'catalog_item_id' => $item->id, 'qty' => $l['qty'], 'rate_snapshot' => $item->rate,
                         'comment' => $l['comment'], 'service_option_id' => $option?->id,
                     ]);
                 }
@@ -297,7 +383,7 @@ class MaterialPlanningSeeder extends Seeder
                     $qty = (int) max(1, min(round($share / $item->rate), round(($item->baseline ?: 40) * 0.75)));
                     $option = $item->serviceOptions()->where('is_default', true)->first();
                     $request->lines()->create([
-                        'sku' => $item->sku, 'qty' => $qty, 'rate_snapshot' => $item->rate,
+                        'catalog_item_id' => $item->id, 'qty' => $qty, 'rate_snapshot' => $item->rate,
                         'comment' => $notes[$i % count($notes)], 'service_option_id' => $option?->id,
                     ]);
                 }
@@ -379,9 +465,9 @@ class MaterialPlanningSeeder extends Seeder
 
             if ($row['reason'] === 'Service option change') {
                 $item = $catalog[$line->sku];
-                $altOption = $item->serviceOptions()->where('id', '!=', $line->service_option_id)->where('status', '!=', 'suspended')->first();
+                $altOption = $item->serviceOptions()->where('id', '!=', $line->service_option_id)->where('classification_id', '!=', 3)->first();
                 $changeOrder->lines()->create([
-                    'request_line_id' => $line->id, 'sku' => $line->sku,
+                    'request_line_id' => $line->id, 'catalog_item_id' => $line->catalog_item_id,
                     'qty_before' => $line->qty, 'qty_after' => $line->qty,
                     'rate_before' => $line->rate_snapshot, 'rate_after' => $altOption?->cost ?? $line->rate_snapshot,
                     'service_option_before_id' => $line->service_option_id, 'service_option_after_id' => $altOption?->id,
@@ -391,7 +477,7 @@ class MaterialPlanningSeeder extends Seeder
                 $item = $catalog[$line->sku];
                 $addQty = max(1, (int) round($line->qty * 0.1));
                 $changeOrder->lines()->create([
-                    'request_line_id' => null, 'sku' => $line->sku,
+                    'request_line_id' => null, 'catalog_item_id' => $line->catalog_item_id,
                     'qty_before' => null, 'qty_after' => $addQty,
                     'rate_before' => null, 'rate_after' => $item->rate,
                     'why' => 'Requested by the venue operations centre',
@@ -400,7 +486,7 @@ class MaterialPlanningSeeder extends Seeder
                 $factor = $factors[$row['reason']];
                 $newQty = $this->applyFactor($line->qty, $factor);
                 $changeOrder->lines()->create([
-                    'request_line_id' => $line->id, 'sku' => $line->sku,
+                    'request_line_id' => $line->id, 'catalog_item_id' => $line->catalog_item_id,
                     'qty_before' => $line->qty, 'qty_after' => $newQty,
                     'rate_before' => $line->rate_snapshot, 'rate_after' => $line->rate_snapshot,
                     'why' => 'Quantity revised against the latest site plan',
@@ -411,7 +497,7 @@ class MaterialPlanningSeeder extends Seeder
                     $second = $lines->where('id', '!=', $line->id)->first();
                     $newQty2 = $this->applyFactor($second->qty, $factor);
                     $changeOrder->lines()->create([
-                        'request_line_id' => $second->id, 'sku' => $second->sku,
+                        'request_line_id' => $second->id, 'catalog_item_id' => $second->catalog_item_id,
                         'qty_before' => $second->qty, 'qty_after' => $newQty2,
                         'rate_before' => $second->rate_snapshot, 'rate_after' => $second->rate_snapshot,
                         'why' => 'Quantity revised against the latest site plan',

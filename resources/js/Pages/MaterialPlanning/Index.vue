@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
 import axios from 'axios';
 
 import DashboardView   from './views/DashboardView.vue';
@@ -10,8 +10,11 @@ import NewRequestView  from './views/NewRequestView.vue';
 import CatalogView     from './views/CatalogView.vue';
 import ServiceOptionsView from './views/ServiceOptionsView.vue';
 import SupplierView       from './views/SupplierView.vue';
+import DomainView         from './views/DomainView.vue';
 import AreaView           from './views/AreaView.vue';
 import SpaceView          from './views/SpaceView.vue';
+import ItemGroupView      from './views/ItemGroupView.vue';
+import ItemSubgroupView   from './views/ItemSubgroupView.vue';
 import ChangeOrdersView   from './views/ChangeOrdersView.vue';
 import ReportsView     from './views/ReportsView.vue';
 import DetailView      from './views/DetailView.vue';
@@ -28,12 +31,16 @@ const props = defineProps({
     venues:         Array,
     domains:        Array,
     statuses:       Object,
+    entityStatuses: Array,
+    classifications: Array,
     people:         Array,
     requests:       Array,
     catalog:        Array,
     suppliers:      Array,
     areas:          Array,
     spaces:         Array,
+    itemGroups:     Array,
+    itemSubgroups:  Array,
     serviceOptions: Array,
     changeOrders:   Array,
     coStates:       Object,
@@ -51,17 +58,51 @@ const nav = [
     { id: 'new',       label: 'New Request',  icon: 'bx bx-plus-circle',     badge: null },
     { id: 'catalog',   label: 'Catalog',      icon: 'bx bx-book-open',       badge: null },
     { id: 'options',   label: 'Service Options', icon: 'bx bx-purchase-tag', badge: null },
-    { id: 'suppliers', label: 'Suppliers',    icon: 'bx bx-store',           badge: null },
-    { id: 'areas',     label: 'Areas',        icon: 'bx bx-category',        badge: null },
-    { id: 'spaces',    label: 'Spaces',       icon: 'bx bx-map-pin',         badge: null },
     { id: 'approvals', label: 'Approvals',    icon: 'bx bx-check-shield',    badge: '3' },
     { id: 'changes',   label: 'Change Orders', icon: 'bx bx-git-compare',    badge: '4' },
     { id: 'reports',   label: 'Reports',      icon: 'bx bx-bar-chart-alt-2', badge: null },
 ];
 
-function openRequest(id) {
+const appSetupsNav = [
+    { id: 'suppliers',       label: 'Suppliers',       icon: 'bx bx-store' },
+    { id: 'domains',         label: 'Domains',         icon: 'bx bx-shape-square' },
+    { id: 'areas',           label: 'Areas',           icon: 'bx bx-category' },
+    { id: 'spaces',          label: 'Spaces',          icon: 'bx bx-map-pin' },
+    { id: 'item-groups',     label: 'Item Groups',     icon: 'bx bx-collection' },
+    { id: 'item-subgroups',  label: 'Item Subgroups',  icon: 'bx bx-list-plus' },
+];
+
+const openSections = ref({ appSetups: false, ems: false, security: false });
+function toggleSection(key) { openSections.value[key] = !openSections.value[key]; }
+
+const sectionOf = {
+    ...Object.fromEntries(appSetupsNav.map(n => [n.id, 'appSetups'])),
+    events: 'ems', venues: 'ems', 'functional-areas': 'ems',
+    permissions: 'security', roles: 'security', 'roles-permissions': 'security', users: 'security',
+};
+watch(activePage, id => {
+    const section = sectionOf[id];
+    if (section) openSections.value[section] = true;
+});
+
+const detailData    = ref(null);
+const detailLoading = ref(false);
+const detailError   = ref(null);
+
+async function openRequest(id) {
     detailId.value = id;
     activePage.value = 'detail';
+    detailData.value = null;
+    detailError.value = null;
+    detailLoading.value = true;
+    try {
+        const { data } = await axios.get(route('mp.requests.show', id));
+        detailData.value = data;
+    } catch (e) {
+        detailError.value = e.response?.data?.message || 'Failed to load request details.';
+    } finally {
+        detailLoading.value = false;
+    }
 }
 const prefilledSku = ref(null);
 function goTo(id, payload = null) {
@@ -69,11 +110,22 @@ function goTo(id, payload = null) {
     prefilledSku.value = (id === 'new' && payload?.sku) ? payload.sku : null;
 }
 
+// A request was created/submitted via NewRequestView — its accessors (items/qty/value/domain)
+// are computed server-side, so refresh `requests` from the server rather than faking it client-side.
+function onRequestSaved() {
+    router.reload({ only: ['requests', 'people'], onFinish: () => goTo('requests') });
+}
+
 const sectionLabels = {
     events: 'Events', venues: 'Venues', 'functional-areas': 'Functional Areas',
     permissions: 'Permissions', roles: 'Roles', 'roles-permissions': 'Roles & Permissions', users: 'Users',
 };
-const currentPageLabel = computed(() => nav.find(n => n.id === activePage.value)?.label || sectionLabels[activePage.value] || '');
+const currentPageLabel = computed(() =>
+    nav.find(n => n.id === activePage.value)?.label
+    || appSetupsNav.find(n => n.id === activePage.value)?.label
+    || sectionLabels[activePage.value]
+    || ''
+);
 
 // ── Event selector ──────────────────────────────────────────────────────────
 const STORAGE_KEY = 'mp_active_event_id';
@@ -153,39 +205,68 @@ onMounted(async () => {
             </nav>
 
             <div class="mp-settings">
-                <div class="mp-settings-title">EMS Settings</div>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'events' }" @click="goTo('events')">
-                    <i class="bx bx-calendar mp-nav-ico"></i>
-                    <span>Events</span>
+                <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('appSetups')">
+                    <span>App Setups</span>
+                    <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.appSetups }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'venues' }" @click="goTo('venues')">
-                    <i class="bx bx-map mp-nav-ico"></i>
-                    <span>Venues</span>
-                </button>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'functional-areas' }" @click="goTo('functional-areas')">
-                    <i class="bx bx-layer mp-nav-ico"></i>
-                    <span>Functional Areas</span>
-                </button>
+                <div class="mp-settings-items" v-show="sidebarCollapsed || openSections.appSetups">
+                    <button
+                        v-for="n in appSetupsNav"
+                        :key="n.id"
+                        class="mp-settings-item"
+                        :class="{ 'mp-settings-active': activePage === n.id }"
+                        @click="goTo(n.id)"
+                    >
+                        <i :class="n.icon" class="mp-nav-ico"></i>
+                        <span>{{ n.label }}</span>
+                    </button>
+                </div>
             </div>
 
             <div class="mp-settings">
-                <div class="mp-settings-title">Security</div>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'permissions' }" @click="goTo('permissions')">
-                    <i class="bx bx-key mp-nav-ico"></i>
-                    <span>Permissions</span>
+                <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('ems')">
+                    <span>EMS Settings</span>
+                    <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.ems }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'roles' }" @click="goTo('roles')">
-                    <i class="bx bx-shield mp-nav-ico"></i>
-                    <span>Roles</span>
+                <div class="mp-settings-items" v-show="sidebarCollapsed || openSections.ems">
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'events' }" @click="goTo('events')">
+                        <i class="bx bx-calendar mp-nav-ico"></i>
+                        <span>Events</span>
+                    </button>
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'venues' }" @click="goTo('venues')">
+                        <i class="bx bx-map mp-nav-ico"></i>
+                        <span>Venues</span>
+                    </button>
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'functional-areas' }" @click="goTo('functional-areas')">
+                        <i class="bx bx-layer mp-nav-ico"></i>
+                        <span>Functional Areas</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="mp-settings">
+                <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('security')">
+                    <span>Security</span>
+                    <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.security }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                 </button>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'roles-permissions' }" @click="goTo('roles-permissions')">
-                    <i class="bx bx-lock-open mp-nav-ico"></i>
-                    <span>Roles &amp; Permissions</span>
-                </button>
-                <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'users' }" @click="goTo('users')">
-                    <i class="bx bx-group mp-nav-ico"></i>
-                    <span>Users</span>
-                </button>
+                <div class="mp-settings-items" v-show="sidebarCollapsed || openSections.security">
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'permissions' }" @click="goTo('permissions')">
+                        <i class="bx bx-key mp-nav-ico"></i>
+                        <span>Permissions</span>
+                    </button>
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'roles' }" @click="goTo('roles')">
+                        <i class="bx bx-shield mp-nav-ico"></i>
+                        <span>Roles</span>
+                    </button>
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'roles-permissions' }" @click="goTo('roles-permissions')">
+                        <i class="bx bx-lock-open mp-nav-ico"></i>
+                        <span>Roles &amp; Permissions</span>
+                    </button>
+                    <button class="mp-settings-item" :class="{ 'mp-settings-active': activePage === 'users' }" @click="goTo('users')">
+                        <i class="bx bx-group mp-nav-ico"></i>
+                        <span>Users</span>
+                    </button>
+                </div>
             </div>
 
             <div class="mp-foot" v-click-outside="() => evtDropdownOpen = false">
@@ -300,6 +381,8 @@ onMounted(async () => {
                     :event="activeEvent"
                     :people="people"
                     :prefill-sku="prefilledSku"
+                    @go-to="goTo"
+                    @request-saved="onRequestSaved"
                 />
 
                 <CatalogView
@@ -319,13 +402,23 @@ onMounted(async () => {
                     :suppliers="suppliers"
                     :service-options="serviceOptions"
                     :people="people"
+                    :classifications="classifications"
                     :event="activeEvent"
                 />
 
                 <SupplierView
                     v-else-if="activePage === 'suppliers'"
                     :suppliers="suppliers"
-                    :people="people"
+                    :classifications="classifications"
+                    :statuses="entityStatuses"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <DomainView
+                    v-else-if="activePage === 'domains'"
+                    :domains="domains"
+                    :statuses="entityStatuses"
                     :permissions="permissions"
                     :event="activeEvent"
                 />
@@ -333,6 +426,7 @@ onMounted(async () => {
                 <AreaView
                     v-else-if="activePage === 'areas'"
                     :areas="areas"
+                    :statuses="entityStatuses"
                     :permissions="permissions"
                     :event="activeEvent"
                 />
@@ -341,6 +435,25 @@ onMounted(async () => {
                     v-else-if="activePage === 'spaces'"
                     :spaces="spaces"
                     :areas="areas"
+                    :statuses="entityStatuses"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <ItemGroupView
+                    v-else-if="activePage === 'item-groups'"
+                    :item-groups="itemGroups"
+                    :domains="domains"
+                    :statuses="entityStatuses"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                />
+
+                <ItemSubgroupView
+                    v-else-if="activePage === 'item-subgroups'"
+                    :item-subgroups="itemSubgroups"
+                    :item-groups="itemGroups"
+                    :statuses="entityStatuses"
                     :permissions="permissions"
                     :event="activeEvent"
                 />
@@ -368,6 +481,9 @@ onMounted(async () => {
                     v-else-if="activePage === 'detail'"
                     :requests="requests"
                     :detail-id="detailId"
+                    :detail-data="detailData"
+                    :detail-loading="detailLoading"
+                    :detail-error="detailError"
                     :domains="domains"
                     :venues="venues"
                     :statuses="statuses"
@@ -461,6 +577,15 @@ onMounted(async () => {
     text-transform: uppercase; color: #76706a;
     padding: 6px 10px 4px;
 }
+.mp-settings-title-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; border: none; background: none; cursor: pointer;
+    border-radius: 6px; transition: background .15s, color .15s;
+}
+.mp-settings-title-btn:hover { background: #f6f5f1; color: #3d3833; }
+.mp-settings-chev { flex-shrink: 0; transition: transform .18s ease; transform: rotate(-90deg); margin-right: 6px; }
+.mp-settings-chev-open { transform: rotate(0deg); }
+.mp-settings-items { overflow: hidden; }
 .mp-settings-item {
     display: flex; align-items: center; gap: 10px;
     padding: 7px 10px; border-radius: 6px;

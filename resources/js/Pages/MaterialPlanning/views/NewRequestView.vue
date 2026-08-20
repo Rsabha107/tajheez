@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import axios from 'axios';
 
 const props = defineProps({
     domains:    Array,
@@ -12,35 +13,31 @@ const props = defineProps({
     prefillSku: { type: String, default: null },
 });
 
-// ── Static data ───────────────────────────────────────────────────────────────
-const siteTypes = ['Mixed Zone','Media Centre','VVIP Lounge','Press Tribune','Volunteer Hub','Anti-Doping','Officials Room','Operations Centre','Broadcast Compound','Catering Tent','Medical Clinic','Accreditation'];
+const emit = defineEmits(['go-to', 'request-saved']);
 
 // ── Form state ────────────────────────────────────────────────────────────────
-const form = ref({
-    title:       'Mixed Zone build-out — Media tier 1',
-    eventCode:   'FWC26',
-    venue:       'USA-MET',
-    siteType:    'Mixed Zone',
-    siteCode:    'MET-MZN-N',
-    siteName:    'Mixed Zone — North',
-    area:        'MEDIA',
-    space:       '3.3.0',
-    lsName:      'Mixed Zone',
-    lsCode:      '3.3.0',
-    baseRoom:    'No',
-    moveIn:      '2026-06-04',
-    moveOut:     '2026-07-22',
-    priority:    'High',
-    approver:    'Auto-route (multi-step)',
-    notes:       'Footprint confirmed with overlay v3.1. Coordinate with broadcast for cable runs.',
-});
-const formLines = ref([
-    { id: 1, domain: 'OVR', group: 'Flooring',   sub: 'Modular',     sku: 'OV-FL-0420', qty: 240, comment: 'Per layout v3.1 — North end' },
-    { id: 2, domain: 'OVR', group: 'Fencing',    sub: 'Heras',       sku: 'OV-FN-2200', qty: 18,  comment: 'Crowd separation' },
-    { id: 3, domain: 'LOG', group: 'Tents',      sub: 'Structures',  sku: 'LG-TN-1010', qty: 2,   comment: 'Broadcaster waiting' },
-    { id: 4, domain: 'IT',  group: 'AV',         sub: 'Displays',    sku: 'IT-AV-0102', qty: 4,   comment: 'Run-of-show feed' },
-]);
-let nextLineId = 5;
+function freshForm() {
+    return {
+        title: '',
+        venue: '',
+        siteType: '',
+        siteCode: '',
+        siteName: '',
+        area: '',
+        space: '',
+        lsName: '',
+        lsCode: '',
+        baseRoom: 'No',
+        moveIn: '',
+        moveOut: '',
+        priority: 'Medium',
+        approver: 'Auto-route (multi-step)',
+        notes: '',
+    };
+}
+const form = ref(freshForm());
+const formLines = ref([]);
+let nextLineId = 1;
 
 const routingCard = ref(null);
 function scrollToRouting() {
@@ -51,7 +48,7 @@ onMounted(() => {
     if (!props.prefillSku) return;
     const item = props.catalog.find(c => c.sku === props.prefillSku);
     if (!item) return;
-    formLines.value = [{ id: nextLineId++, domain: item.domain, group: item.group, sub: item.sub, sku: item.sku, qty: 1, comment: '' }];
+    formLines.value = [{ id: nextLineId++, backendId: null, domain: item.domain, group: item.group, sub: item.sub, sku: item.sku, qty: 1, comment: '' }];
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -96,9 +93,12 @@ function isLowStock(line) {
     return it && line.qty > it.stock * 0.6;
 }
 function addLine() {
-    formLines.value.push({ id: nextLineId++, domain: 'IT', group: '', sub: '', sku: '', qty: 1, comment: '' });
+    formLines.value.push({ id: nextLineId++, backendId: null, domain: 'IT', group: '', sub: '', sku: '', qty: 1, comment: '' });
 }
+const removedLineIds = ref([]);
 function removeLine(id) {
+    const line = formLines.value.find(l => l.id === id);
+    if (line?.backendId) removedLineIds.value.push(line.backendId);
     formLines.value = formLines.value.filter(l => l.id !== id);
 }
 function updateLine(id, field, val) {
@@ -115,6 +115,106 @@ const formTotal = computed(() =>
         return s + (it ? it.rate * l.qty : 0);
     }, 0)
 );
+
+// ── Reference layout file ────────────────────────────────────────────────────
+const layoutFileInput = ref(null);
+const layoutFile = ref(null);          // newly-picked File, not yet uploaded
+const savedLayoutFileName = ref(null); // filename once persisted server-side
+function pickLayoutFile() { layoutFileInput.value?.click(); }
+function onLayoutFileChange(e) {
+    layoutFile.value = e.target.files[0] || null;
+}
+function fmtBytes(n) {
+    if (!n) return '';
+    const kb = n / 1024;
+    return kb < 1024 ? Math.round(kb) + ' KB' : (kb / 1024).toFixed(1) + ' MB';
+}
+
+// ── Persist ───────────────────────────────────────────────────────────────────
+const saving = ref(false);
+const error = ref(null);
+const createdRequestId = ref(null);
+const createdRequestCode = ref(null);
+const lastSavedAt = ref(null);
+
+const canSave = computed(() => !!props.event?.id);
+
+async function persist(shouldSubmit) {
+    if (saving.value || !canSave.value) return;
+    if (!form.value.venue) { error.value = 'Select a venue.'; return; }
+    if (!formLines.value.some(l => l.sku)) { error.value = 'Add at least one item.'; return; }
+
+    saving.value = true;
+    error.value = null;
+    try {
+        const areaLabel = props.areas.find(a => a.id === form.value.area)?.label ?? null;
+
+        const payload = new FormData();
+        payload.append('title', form.value.title.trim() || 'Untitled request');
+        payload.append('event_id', props.event.id);
+        payload.append('venue_id', form.value.venue);
+        if (form.value.siteType) payload.append('site_type', form.value.siteType);
+        if (form.value.siteCode) payload.append('site_code', form.value.siteCode);
+        if (form.value.siteName) payload.append('site_name', form.value.siteName);
+        if (areaLabel) payload.append('ls_category', areaLabel);
+        if (form.value.lsName) payload.append('ls_name', form.value.lsName);
+        if (form.value.lsCode) payload.append('ls_code', form.value.lsCode);
+        payload.append('base_room', form.value.baseRoom);
+        if (form.value.moveIn) payload.append('move_in', form.value.moveIn);
+        if (form.value.moveOut) payload.append('move_out', form.value.moveOut);
+        payload.append('priority', form.value.priority);
+        payload.append('approver_routing', form.value.approver);
+        if (form.value.notes) payload.append('notes', form.value.notes);
+        if (layoutFile.value) payload.append('layout_file', layoutFile.value);
+
+        let saved;
+        if (!createdRequestId.value) {
+            const { data } = await axios.post(route('mp.requests.store'), payload);
+            saved = data;
+        } else {
+            payload.append('_method', 'PUT');
+            const { data } = await axios.post(route('mp.requests.update', createdRequestId.value), payload);
+            saved = data;
+        }
+        createdRequestId.value = saved.id;
+        createdRequestCode.value = saved.code;
+        savedLayoutFileName.value = saved.layoutFileName;
+        layoutFile.value = null;
+
+        for (const line of formLines.value) {
+            if (!line.sku) continue;
+            if (line.backendId) {
+                await axios.put(route('mp.request-lines.update', line.backendId), {
+                    qty: line.qty, comment: line.comment || null,
+                });
+            } else {
+                const { data } = await axios.post(route('mp.request-lines.store', createdRequestId.value), {
+                    sku: line.sku, qty: line.qty, comment: line.comment || null,
+                });
+                line.backendId = data.id;
+            }
+        }
+
+        for (const lineId of removedLineIds.value) {
+            await axios.delete(route('mp.request-lines.destroy', lineId));
+        }
+        removedLineIds.value = [];
+
+        if (shouldSubmit) {
+            const { data } = await axios.post(route('mp.requests.submit', createdRequestId.value));
+            createdRequestCode.value = data.code;
+            emit('request-saved');
+        } else {
+            lastSavedAt.value = new Date();
+        }
+    } catch (e) {
+        error.value = e.response?.status === 403
+            ? "You don't have permission to save this request."
+            : (Object.values(e.response?.data?.errors ?? {})[0]?.[0] ?? 'Could not save this request. Please try again.');
+    } finally {
+        saving.value = false;
+    }
+}
 </script>
 
 <template>
@@ -122,14 +222,22 @@ const formTotal = computed(() =>
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">New material request</h1>
-                <p class="mp-page-sub">Auto-saved · draft <span class="mono">MR-26-04190</span> · last saved 4 sec ago</p>
+                <p class="mp-page-sub">
+                    <template v-if="createdRequestCode">
+                        Draft <span class="mono">{{ createdRequestCode }}</span><span v-if="lastSavedAt"> · saved {{ lastSavedAt.toLocaleTimeString() }}</span>
+                    </template>
+                    <template v-else>Not yet saved</template>
+                </p>
             </div>
             <div class="mp-head-actions">
-                <button class="mp-btn">Save draft</button>
+                <button class="mp-btn" :disabled="saving || !canSave" @click="persist(false)">{{ saving ? 'Saving…' : 'Save draft' }}</button>
                 <button class="mp-btn" @click="scrollToRouting">Preview routing</button>
-                <button class="mp-btn mp-btn-primary">Submit for approval</button>
+                <button class="mp-btn mp-btn-primary" :disabled="saving || !canSave" @click="persist(true)">{{ saving ? 'Saving…' : 'Submit for approval' }}</button>
             </div>
         </div>
+
+        <div v-if="error" class="mp-banner mp-banner-error">{{ error }}</div>
+        <div v-if="!canSave" class="mp-banner mp-banner-warn">No active event selected — pick one from the sidebar before saving a request.</div>
 
         <!-- Site context -->
         <div class="mp-card">
@@ -139,40 +247,21 @@ const formTotal = computed(() =>
             </div>
             <div class="mp-form-grid">
                 <div class="mp-field mp-span-2">
-                    <label>Request title</label>
-                    <input v-model="form.title"/>
+                    <label>Request title <span class="mp-req">*</span></label>
+                    <input v-model="form.title" placeholder="e.g. Mixed Zone build-out — Media tier 1"/>
                 </div>
                 <div class="mp-field">
-                    <label>Event</label>
-                    <select v-model="form.eventCode">
-                        <option value="FWC26">FWC26 — FIFA World Cup 2026</option>
-                    </select>
+                    <label>Event <span class="mp-req">*</span></label>
+                    <div class="mp-static-field">
+                        {{ event?.name || '— No active event —' }}<span v-if="event?.code"> ({{ event.code }})</span>
+                    </div>
                 </div>
                 <div class="mp-field">
-                    <label>Priority</label>
-                    <select v-model="form.priority">
-                        <option v-for="p in ['Low','Medium','High','Critical']" :key="p">{{ p }}</option>
-                    </select>
-                </div>
-                <div class="mp-field">
-                    <label>Venue</label>
+                    <label>Venue <span class="mp-req">*</span></label>
                     <select v-model="form.venue">
-                        <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.code }} · {{ v.name }}</option>
+                        <option value="">— Venue —</option>
+                        <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} · {{ v.name }}</option>
                     </select>
-                </div>
-                <div class="mp-field">
-                    <label>Site type</label>
-                    <select v-model="form.siteType">
-                        <option v-for="t in siteTypes" :key="t">{{ t }}</option>
-                    </select>
-                </div>
-                <div class="mp-field">
-                    <label>Site code</label>
-                    <input v-model="form.siteCode" class="mono"/>
-                </div>
-                <div class="mp-field">
-                    <label>Site name</label>
-                    <input v-model="form.siteName"/>
                 </div>
                 <div class="mp-field">
                     <label>Move-in</label>
@@ -222,13 +311,21 @@ const formTotal = computed(() =>
                 </div>
                 <div class="mp-field">
                     <label>Reference layout</label>
-                    <div class="mp-upload">
+                    <input ref="layoutFileInput" type="file" accept=".dwg,.dxf,.pdf,.png,.jpg,.jpeg" style="display:none" @change="onLayoutFileChange"/>
+                    <div v-if="layoutFile || savedLayoutFileName" class="mp-upload">
                         <span class="mp-upload-ico">↑</span>
                         <div>
-                            <div class="mp-upload-name">layout-mixedzone-v3.1.dwg</div>
-                            <div class="mp-upload-meta mono">1.4 MB · uploaded Apr 22</div>
+                            <div class="mp-upload-name">{{ layoutFile?.name || savedLayoutFileName }}</div>
+                            <div class="mp-upload-meta mono">
+                                <template v-if="layoutFile">{{ fmtBytes(layoutFile.size) }} · not yet saved</template>
+                                <template v-else>uploaded</template>
+                            </div>
                         </div>
-                        <button class="mp-upload-x">Replace</button>
+                        <button type="button" class="mp-upload-x" @click="pickLayoutFile">Replace</button>
+                    </div>
+                    <div v-else class="mp-upload mp-upload-empty mp-upload-clickable" @click="pickLayoutFile">
+                        <span class="mp-upload-ico">+</span>
+                        <div class="mp-upload-name">Click to attach a DWG, DXF or PDF layout</div>
                     </div>
                 </div>
             </div>
@@ -237,7 +334,7 @@ const formTotal = computed(() =>
         <!-- Items -->
         <div class="mp-card">
             <div class="mp-card-head">
-                <h3 class="mp-card-title">Items</h3>
+                <h3 class="mp-card-title">Items <span class="mp-req">*</span></h3>
                 <div class="mp-card-sub">{{ formLines.length }} lines · estimated <b class="mono">{{ fmtMoney(formTotal) }}</b></div>
             </div>
             <div class="mp-ir-head">
@@ -247,7 +344,7 @@ const formTotal = computed(() =>
             <div class="mp-ir-body">
                 <div v-for="l in formLines" :key="l.id" class="mp-ir">
                     <select :value="l.domain" @change="updateLine(l.id,'domain',$event.target.value)">
-                        <option v-for="d in domains" :key="d.id" :value="d.id">{{ d.label }}</option>
+                        <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
                     </select>
                     <select :value="l.group" @change="updateLine(l.id,'group',$event.target.value)">
                         <option value="">— Group —</option>
@@ -279,6 +376,7 @@ const formTotal = computed(() =>
                     <input :value="l.comment" @input="updateLine(l.id,'comment',$event.target.value)" placeholder="Comment (location, spec, deadline…)"/>
                     <button class="mp-ir-x" title="Remove line" @click="removeLine(l.id)">×</button>
                 </div>
+                <div v-if="!formLines.length" class="mp-ir-empty">No items yet — click "+ Add item" to start building this request.</div>
             </div>
             <div class="mp-ir-foot">
                 <button class="mp-btn" @click="addLine">+ Add item</button>
@@ -336,8 +434,8 @@ const formTotal = computed(() =>
         </div>
 
         <div class="mp-page-foot">
-            <button class="mp-btn">Save draft</button>
-            <button class="mp-btn mp-btn-primary">Submit for approval</button>
+            <button class="mp-btn" :disabled="saving || !canSave" @click="persist(false)">{{ saving ? 'Saving…' : 'Save draft' }}</button>
+            <button class="mp-btn mp-btn-primary" :disabled="saving || !canSave" @click="persist(true)">{{ saving ? 'Saving…' : 'Submit for approval' }}</button>
         </div>
     </div>
 </template>
@@ -364,6 +462,12 @@ const formTotal = computed(() =>
 .mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
 .mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
 
+.mp-banner {
+    padding: 10px 14px; border-radius: 8px; font-size: 12.5px; margin-bottom: 14px;
+}
+.mp-banner-error { background: #fee2e2; color: #991b1b; }
+.mp-banner-warn { background: #fef3c7; color: #92400e; }
+
 .mp-card {
     background: #fff; border: 1px solid #e8e4db; border-radius: 10px;
     box-shadow: 0 1px 0 rgba(20,16,12,.03), 0 1px 2px rgba(20,16,12,.04);
@@ -376,6 +480,7 @@ const formTotal = computed(() =>
 .mp-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
 .mp-field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
 .mp-field label { font-weight: 600; color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.mp-req { color: #b91c1c; font-weight: 700; }
 .mp-field input, .mp-field select, .mp-field textarea {
     border: 1px solid #e8e4db; border-radius: 6px;
     padding: 8px 10px; font-size: 13px; background: #fff; color: #1a1614;
@@ -387,11 +492,17 @@ const formTotal = computed(() =>
 .mp-field textarea { resize: vertical; min-height: 64px; font-family: inherit; }
 .mp-span-2 { grid-column: span 2; }
 
+.mp-static-field {
+    border: 1px solid #e8e4db; border-radius: 6px;
+    padding: 8px 10px; font-size: 13px; background: #fbfaf6; color: #1a1614;
+}
+
 .mp-upload {
     display: flex; align-items: center; gap: 10px;
     padding: 10px 12px; background: #fbfaf6;
     border: 1px dashed #e8e4db; border-radius: 6px;
 }
+.mp-upload-clickable { cursor: pointer; }
 .mp-upload-ico {
     width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
     background: #0f766e1c; color: #0f766e;
@@ -427,6 +538,7 @@ const formTotal = computed(() =>
     cursor: pointer; font-size: 16px; padding: 0;
 }
 .mp-ir-x:hover { background: #fee2e2; color: #991b1b; border-color: #991b1b; }
+.mp-ir-empty { padding: 20px 4px; text-align: center; font-size: 12.5px; color: #76706a; }
 .mp-ir-foot { display: flex; align-items: center; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #efece4; flex-wrap: wrap; }
 .mp-ir-foot-btn { background: transparent; border: 0; color: #0f766e; font-size: 12px; cursor: pointer; padding: 0; }
 .mp-ir-foot-btn:hover { text-decoration: underline; }

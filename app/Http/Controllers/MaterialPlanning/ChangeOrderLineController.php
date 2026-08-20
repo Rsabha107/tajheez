@@ -25,10 +25,14 @@ class ChangeOrderLineController extends Controller
             'why' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $item = CatalogItem::findOrFail($data['sku']);
+        $item = CatalogItem::where('sku', $data['sku'])->firstOrFail();
         Gate::authorize('createForChangeOrder', [ChangeOrderLine::class, $changeOrder, $item]);
 
-        $line = $changeOrder->lines()->create($data);
+        unset($data['sku']);
+        $line = $changeOrder->lines()->create([
+            ...$data,
+            'catalog_item_id' => $item->id,
+        ]);
 
         return response()->json(['id' => $line->id], 201);
     }
