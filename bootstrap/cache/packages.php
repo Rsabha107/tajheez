@@ -6,6 +6,13 @@
       0 => 'Inertia\\ServiceProvider',
     ),
   ),
+  'kitloong/laravel-migrations-generator' => 
+  array (
+    'providers' => 
+    array (
+      0 => 'KitLoong\\MigrationsGenerator\\MigrationsGeneratorServiceProvider',
+    ),
+  ),
   'laravel/breeze' => 
   array (
     'providers' => 
