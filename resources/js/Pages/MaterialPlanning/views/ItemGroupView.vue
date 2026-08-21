@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const props = defineProps({
     itemGroups:  Array,
@@ -37,11 +38,12 @@ const rows = computed(() => {
 
 function domainLabel(code) { return props.domains.find(d => d.id === code)?.label || code; }
 
-// ── New item group modal ────────────────────────────────────────────────────
+// ── Add / edit item group modal ───────────────────────────────────────────────
 const showAdd = ref(false);
 const saving = ref(false);
 const error = ref(null);
 const justAdded = ref(null);
+const editingId = ref(null);
 
 function freshForm() {
     return { code: '', domain: props.domains[0]?.id ?? '', label: '', description: '', sortOrder: groupList.value.length + 1, status: defaultStatusId() };
@@ -50,45 +52,81 @@ const form = ref(freshForm());
 const formValid = computed(() => /^[A-Z0-9_]+$/.test(form.value.code) && form.value.domain && form.value.label.trim());
 
 function openAdd() {
+    editingId.value = null;
     form.value = freshForm();
+    error.value = null;
+    showAdd.value = true;
+}
+function openEdit(group) {
+    editingId.value = group.id;
+    form.value = {
+        code: group.code,
+        domain: group.domain,
+        label: group.label,
+        description: group.description || '',
+        sortOrder: group.sortOrder,
+        status: group.statusId,
+    };
     error.value = null;
     showAdd.value = true;
 }
 function closeAdd() { showAdd.value = false; }
 
-async function addGroup() {
+async function submitGroup() {
     if (!formValid.value || saving.value) return;
     saving.value = true;
     error.value = null;
+    const payload = {
+        code: form.value.code.trim().toUpperCase(),
+        domain_id: form.value.domain,
+        label: form.value.label.trim(),
+        description: form.value.description.trim() || null,
+        sort_order: +form.value.sortOrder || 0,
+        status_id: form.value.status,
+    };
     try {
-        const { data } = await axios.post(route('mp.item-groups.store'), {
-            code: form.value.code.trim().toUpperCase(),
-            domain_id: form.value.domain,
-            label: form.value.label.trim(),
-            description: form.value.description.trim() || null,
-            sort_order: +form.value.sortOrder || 0,
-            status_id: form.value.status,
-        });
-        groupList.value.push(data);
-        justAdded.value = data.id;
+        if (editingId.value) {
+            const { data } = await axios.put(route('mp.item-groups.update', editingId.value), payload);
+            const idx = groupList.value.findIndex(g => g.id === editingId.value);
+            if (idx !== -1) groupList.value[idx] = data;
+        } else {
+            const { data } = await axios.post(route('mp.item-groups.store'), payload);
+            groupList.value.push(data);
+            justAdded.value = data.id;
+            setTimeout(() => { justAdded.value = null; }, 2400);
+        }
         closeAdd();
-        setTimeout(() => { justAdded.value = null; }, 2400);
     } catch (e) {
         error.value = e.response?.status === 403
-            ? "You don't have permission to add an item group."
+            ? `You don't have permission to ${editingId.value ? 'edit' : 'add'} an item group.`
             : (e.response?.data?.errors?.code?.[0] ?? 'Could not save this item group. Please try again.');
     } finally {
         saving.value = false;
     }
 }
 
-async function deleteGroup(group) {
-    if (!confirm(`Remove ${group.label}? Subgroups assigned to it will block this until reassigned.`)) return;
+// ── Delete item group ────────────────────────────────────────────────────────
+const confirmDeleteRow = ref(null);
+const deleting = ref(false);
+const deleteError = ref(null);
+function askDelete(group) {
+    confirmDeleteRow.value = group;
+    deleteError.value = null;
+}
+async function confirmDelete() {
+    if (!confirmDeleteRow.value) return;
+    deleting.value = true;
+    deleteError.value = null;
     try {
-        await axios.delete(route('mp.item-groups.destroy', group.id));
-        groupList.value = groupList.value.filter(g => g.id !== group.id);
+        await axios.delete(route('mp.item-groups.destroy', confirmDeleteRow.value.id));
+        groupList.value = groupList.value.filter(g => g.id !== confirmDeleteRow.value.id);
+        confirmDeleteRow.value = null;
     } catch (e) {
-        alert(e.response?.status === 403 ? "You don't have permission to remove item groups." : 'Could not remove this item group — it may still have subgroups assigned.');
+        deleteError.value = e.response?.status === 403
+            ? "You don't have permission to remove item groups."
+            : 'Could not remove this item group — it may still have subgroups assigned.';
+    } finally {
+        deleting.value = false;
     }
 }
 
@@ -144,8 +182,9 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <td class="area-desc">{{ g.description || '—' }}</td>
                         <td><span class="status-chip" :style="{ background: statusMeta(g.statusColor).bg, color: statusMeta(g.statusColor).fg }">{{ g.statusName || '—' }}</span></td>
                         <td class="ta-r mono">{{ g.subgroupsCount }}</td>
-                        <td class="ta-r">
-                            <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteGroup(g)">Remove</button>
+                        <td class="ta-r mp-dt-actions">
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEdit(g)"><i class="bx bx-pencil"></i></button>
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-del" title="Delete" @click="askDelete(g)"><i class="bx bx-trash"></i></button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
@@ -164,7 +203,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <header class="skum-hd">
                     <div class="skum-hd-l">
                         <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Item Groups</span></div>
-                        <h2 class="skum-title">New item group</h2>
+                        <h2 class="skum-title">{{ editingId ? 'Edit item group' : 'New item group' }}</h2>
                         <p class="skum-sub">A broad catalog grouping that item subgroups belong to.</p>
                     </div>
                     <button class="skum-x" @click="closeAdd" aria-label="Close">
@@ -177,8 +216,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <div class="form-grid">
                             <div class="field">
                                 <label class="field-lbl">Code</label>
-                                <input v-model="form.code" placeholder="e.g. FURN" class="mono"/>
-                                <span class="field-hint">Letters, numbers, underscores only.</span>
+                                <input v-model="form.code" placeholder="e.g. FURN" class="mono" :disabled="!!editingId"/>
+                                <span class="field-hint">{{ editingId ? 'Code cannot be changed after creation.' : 'Letters, numbers, underscores only.' }}</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Domain</label>
@@ -222,12 +261,28 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="addGroup">{{ saving ? 'Adding…' : 'Add item group' }}</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitGroup">
+                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add item group') }}
+                        </button>
                     </div>
                 </footer>
             </div>
         </div>
     </Teleport>
+
+    <ConfirmModal
+        v-if="confirmDeleteRow"
+        :title="`Remove ${confirmDeleteRow.label}?`"
+        message="Subgroups assigned to it will block this until reassigned."
+        confirm-text="Remove"
+        loading-text="Removing…"
+        :loading="deleting"
+        danger
+        @cancel="confirmDeleteRow = null"
+        @confirm="confirmDelete"
+    >
+        <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+    </ConfirmModal>
 </template>
 
 <style scoped>
@@ -288,6 +343,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
 
+.mp-dt-actions { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
+.mp-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background .15s; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
+
 /* ── Modal shell ──────────────────────────────────────────────────────────── */
 @keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
@@ -336,6 +399,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.field input:disabled { background: #f6f5f1; color: #76706a; cursor: not-allowed; }
 .sel { position: relative; display: flex; align-items: center; }
 .sel select {
     width: 100%; appearance: none; border: 1px solid #e8e4db; border-radius: 7px;

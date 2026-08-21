@@ -239,7 +239,7 @@ class UserController extends Controller
     /** Bootstrap Table endpoint – GET /api/users */
     public function data(Request $request)
     {
-        $limit  = max(1, min((int) $request->input('limit', 10), 100));
+        $limit  = max(1, min((int) $request->input('limit', 10), 500));
         $offset = (int) $request->input('offset', 0);
         $order  = in_array(strtolower($request->input('order', 'desc')), ['asc', 'desc'])
             ? strtolower($request->input('order', 'desc'))

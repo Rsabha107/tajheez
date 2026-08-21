@@ -185,6 +185,7 @@ class MaterialRequestController extends Controller
         return array_merge($this->present($materialRequest), [
             'title' => $materialRequest->title,
             'venue' => $materialRequest->venue?->short_name,
+            'venueId' => $materialRequest->venue_id,
             'functionalAreaId' => $materialRequest->functional_area_id,
             'functionalArea' => $materialRequest->functionalArea?->title,
             'site' => $materialRequest->site_name,

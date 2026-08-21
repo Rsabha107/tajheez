@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 
 const emit = defineEmits(['go-to']);
@@ -27,7 +27,13 @@ const availProcurement = ref(false);
 const sourceOwn        = ref(true);
 const sourceRental     = ref(true);
 const sourceNew        = ref(false);
-const maxRate      = ref(20000);
+// The slider's ceiling must track the actual catalog — a hardcoded cap silently
+// hides any item priced above it with no way to reveal it (items > cap just vanish).
+const rateCeiling = computed(() => catalogItems.value.reduce((m, i) => Math.max(m, Math.ceil(i.rate / 1000) * 1000), 20000));
+const maxRate      = ref(rateCeiling.value);
+watch(rateCeiling, (next, prev) => {
+    if (maxRate.value === prev) maxRate.value = next; // only auto-follow if the user hasn't narrowed it manually
+});
 const refreshing   = ref(false);
 
 function refreshCatalog() {
@@ -229,7 +235,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <!-- Rate range -->
                 <div class="cat-side-grp">
                     <div class="cat-side-lbl">Rate range</div>
-                    <input v-model="maxRate" type="range" min="0" max="20000" step="500" class="cat-range-slider" />
+                    <input v-model="maxRate" type="range" min="0" :max="rateCeiling" step="500" class="cat-range-slider" />
                     <div class="cat-range-meta mono">$0 — {{ fmtMoney(maxRate) }}</div>
                 </div>
 

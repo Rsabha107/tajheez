@@ -18,6 +18,7 @@ const props = defineProps({
     suppliers:     { type: Array, default: () => [] },
     serviceOptions: { type: Array, default: () => [] },
     permissions:   { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
+    showItemValues: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['go-to', 'refresh-detail']);
@@ -142,7 +143,6 @@ function avatarColor(name) {
             <div>
                 <button class="mp-back-btn" @click="emit('go-to', 'requests')">← Back to requests</button>
                 <h1 class="mp-page-title">
-                    {{ detailRequest.title }}
                     <span class="mono mp-detail-id">{{ detailRequest.code }}</span>
                 </h1>
                 <div class="mp-detail-meta">
@@ -150,15 +150,17 @@ function avatarColor(name) {
                         <span class="mp-pill-dot" :style="{ background: statuses[detailRequest.status]?.dot }"/>
                         {{ statuses[detailRequest.status]?.label }}
                     </span>
-                    <span class="mp-dtag" :style="{ background: domainOf(detailRequest.domain)?.chip, color: domainOf(detailRequest.domain)?.color }">
-                        <b>{{ detailRequest.domain }}</b> {{ domainOf(detailRequest.domain)?.label }}
-                    </span>
                     <span class="mp-dm-item"><span class="mp-dm-lbl">Venue</span> {{ venueOf(detailRequest.venue)?.name }}</span>
                     <span class="mp-dm-item"><span class="mp-dm-lbl">Site</span> {{ detailRequest.site }}</span>
-                    <span class="mp-dm-item"><span class="mp-dm-lbl">Value</span> <b class="mono">{{ fmtMoney(detailRequest.value) }}</b></span>
+                    <span v-if="showItemValues" class="mp-dm-item"><span class="mp-dm-lbl">Value</span> <b class="mono">{{ fmtMoney(detailRequest.value) }}</b></span>
                 </div>
             </div>
             <div class="mp-head-actions">
+                <button
+                    v-if="detailRequest.status === 'draft'"
+                    class="mp-btn"
+                    @click="emit('go-to', 'new', { editCode: detailRequest.code })"
+                ><i class="bx bx-pencil"></i> Edit</button>
                 <button class="mp-btn">Duplicate</button>
                 <button class="mp-btn">Open change order</button>
                 <button class="mp-btn mp-btn-primary">✓ Approve</button>
@@ -234,15 +236,21 @@ function avatarColor(name) {
             <div v-if="detailTab === 'items'" class="mp-card mp-card-flush">
                 <div v-if="!detailLines.length" class="mp-empty">No line items yet.</div>
                 <table v-else class="mp-dt">
-                    <thead><tr><th>SKU</th><th>Item</th><th class="ta-c">Qty</th><th>Unit</th><th class="ta-c">Rate</th><th class="ta-c">Total</th><th>Comment</th><th>Service</th><th></th></tr></thead>
+                    <thead><tr><th>SKU</th><th>Item</th><th>Domain</th><th class="ta-c">Qty</th><th>Unit</th><th v-if="showItemValues" class="ta-c">Rate</th><th v-if="showItemValues" class="ta-c">Total</th><th>Comment</th><th>Service</th><th></th></tr></thead>
                     <tbody>
                         <tr v-for="l in detailLines" :key="l.id">
                             <td class="mono">{{ l.sku }}</td>
                             <td>{{ l.name }}</td>
+                            <td>
+                                <span v-if="l.domain" class="mp-dtag" :style="{ background: domainOf(l.domain)?.chip, color: domainOf(l.domain)?.color }">
+                                    <b>{{ l.domain }}</b>
+                                </span>
+                                <span v-else class="mp-muted">—</span>
+                            </td>
                             <td class="ta-c mono">{{ l.qty }}</td>
                             <td class="mono">{{ l.unit }}</td>
-                            <td class="ta-c mono">{{ fmtMoney(l.rate) }}</td>
-                            <td class="ta-c mono">{{ fmtMoney(l.value) }}</td>
+                            <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(l.rate) }}</td>
+                            <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(l.value) }}</td>
                             <td>{{ l.comment }}</td>
                             <td>
                                 <div v-if="l.serviceOptionName" class="mp-dt-optn">
@@ -294,26 +302,26 @@ function avatarColor(name) {
                     <thead>
                         <tr>
                             <th>SKU</th><th>Item</th>
-                            <th class="ta-r">Original qty</th><th class="ta-r">Proposed qty</th>
-                            <th class="ta-r">Δ value</th><th>Why</th>
+                            <th class="ta-c">Original qty</th><th class="ta-c">Proposed qty</th>
+                            <th v-if="showItemValues" class="ta-c">Δ value</th><th>Why</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr v-for="d in diffLines" :key="d.sku" :class="{ 'mp-diff-changed': d.changed }">
                             <td class="mono">{{ d.sku }}</td>
                             <td>{{ d.name }}</td>
-                            <td class="ta-r mono">{{ d.qtyBefore }}</td>
-                            <td class="ta-r mono">{{ d.qtyAfter }}</td>
-                            <td class="ta-r mono" :class="d.dValue > 0 ? 'mp-diff-pos' : d.dValue < 0 ? 'mp-diff-neg' : ''">
+                            <td class="ta-c mono">{{ d.qtyBefore }}</td>
+                            <td class="ta-c mono">{{ d.qtyAfter }}</td>
+                            <td v-if="showItemValues" class="ta-c mono" :class="d.dValue > 0 ? 'mp-diff-pos' : d.dValue < 0 ? 'mp-diff-neg' : ''">
                                 {{ d.dValue === 0 ? '—' : (d.dValue > 0 ? '+' : '') + fmtMoney(d.dValue) }}
                             </td>
                             <td class="mp-diff-reason">{{ d.why }}</td>
                         </tr>
                     </tbody>
-                    <tfoot>
+                    <tfoot v-if="showItemValues">
                         <tr>
                             <td colspan="4" class="ta-r">Net change</td>
-                            <td class="ta-r mono" :class="netChange > 0 ? 'mp-diff-pos' : netChange < 0 ? 'mp-diff-neg' : ''">
+                            <td class="ta-c mono" :class="netChange > 0 ? 'mp-diff-pos' : netChange < 0 ? 'mp-diff-neg' : ''">
                                 {{ (netChange > 0 ? '+' : '') + fmtMoney(netChange) }}
                             </td>
                             <td/>
@@ -369,7 +377,7 @@ function avatarColor(name) {
 
 .mp-back-btn { background: none; border: none; color: #0f766e; cursor: pointer; font-size: 13px; margin-bottom: 6px; padding: 0; }
 .mp-back-btn:hover { text-decoration: underline; }
-.mp-detail-id { font-size: 13px; color: #76706a; font-weight: 400; margin-left: 10px; }
+.mp-detail-id { font-size: 20px; color: #1a1614; font-weight: 700; }
 .mp-detail-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; }
 .mp-dm-item { font-size: 12px; color: #76706a; }
 .mp-dm-lbl { margin-right: 3px; }
@@ -445,6 +453,7 @@ function avatarColor(name) {
 
 .mp-diff { width: 100%; border-collapse: collapse; font-size: 13px; }
 .mp-diff th { background: #fbfaf6; border-bottom: 1px solid #e8e4db; color: #76706a; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 10px 14px; text-align: left; }
+.mp-diff th.ta-c { text-align: center; }
 .mp-diff td { padding: 10px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; }
 .mp-diff-changed td { background: #fffbf0; }
 .mp-diff-old { text-decoration: line-through; color: #76706a; font-size: 12px; }

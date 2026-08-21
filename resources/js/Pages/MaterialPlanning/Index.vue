@@ -49,27 +49,71 @@ const props = defineProps({
     functionalAreas: { type: Array, default: () => [] },
 });
 
+// ── Event selector ──────────────────────────────────────────────────────────
+// Active event is resolved server-side from the PHP session (see
+// MaterialPlanningController::index()/setActiveEvent()), so the selection
+// persists across reloads and devices instead of living in localStorage.
+// Declared up here (ahead of Navigation) because the nav badge counts below
+// need to react to whichever event is currently active.
+const availableEvents = ref([]);
+const selectedEventId = ref(props.event?.id ?? null);
+
+async function persistActiveEvent(id) {
+    try {
+        await axios.put(route('material-planning.active-event.update'), { event_id: id });
+    } catch (_) {}
+}
+
+function eventCode(ev) {
+    if (!ev) return '—';
+    if (ev.code) return ev.code;
+    return (ev.name ?? '').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 6) || '—';
+}
+
+const activeEvent = computed(() => {
+    if (!selectedEventId.value || !availableEvents.value.length) return props.event;
+    const found = availableEvents.value.find(e => e.id === selectedEventId.value);
+    if (!found) return props.event;
+    if (found.id === props.event?.id) return props.event;
+    return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null };
+});
+
 // ── Navigation ─────────────────────────────────────────────────────────────
 const activePage       = ref('dash');
 const detailId         = ref(null);
 const sidebarCollapsed = ref(false);
 
-const nav = [
-    { id: 'dash',      label: 'Dashboard',    icon: 'bx bx-grid-alt',       badge: null },
-    { id: 'requests',  label: 'Requests',     icon: 'bx bx-list-ul',         badge: '7' },
-    { id: 'new',       label: 'New Request',  icon: 'bx bx-plus-circle',     badge: null },
-    { id: 'catalog',   label: 'Catalog',      icon: 'bx bx-book-open',       badge: null },
-    { id: 'options',   label: 'Service Options', icon: 'bx bx-purchase-tag', badge: null },
-    { id: 'approvals', label: 'Approvals',    icon: 'bx bx-check-shield',    badge: '3' },
-    { id: 'changes',   label: 'Change Orders', icon: 'bx bx-git-compare',    badge: '4' },
-    { id: 'reports',   label: 'Reports',      icon: 'bx bx-bar-chart-alt-2', badge: null },
-    { id: 'settings',  label: 'Settings',     icon: 'bx bx-cog',             badge: null },
-];
+// Badge counts are scoped to the active event and derived from the same
+// requests/changeOrders data the list views use, instead of being hardcoded.
+const navEventRequests = computed(() =>
+    activeEvent.value?.id ? props.requests.filter(r => r.eventId === activeEvent.value.id) : props.requests
+);
+const navEventChangeOrders = computed(() =>
+    activeEvent.value?.id ? props.changeOrders.filter(co => co.eventId === activeEvent.value.id) : props.changeOrders
+);
+
+const nav = computed(() => {
+    const draftCount = navEventRequests.value.filter(r => r.status === 'draft').length;
+    const approvalCount = navEventRequests.value.filter(r => ['submitted', 'l1', 'l2', 'finance', 'changed'].includes(r.status)).length;
+    const changeOrderCount = navEventChangeOrders.value.filter(co => co.state === 'pending').length;
+
+    return [
+        { id: 'dash',      label: 'Dashboard',    icon: 'bx bx-grid-alt',       badge: null },
+        { id: 'requests',  label: 'Requests',     icon: 'bx bx-list-ul',         badge: draftCount ? String(draftCount) : null },
+        { id: 'new',       label: 'New Request',  icon: 'bx bx-plus-circle',     badge: null },
+        { id: 'catalog',   label: 'Catalog',      icon: 'bx bx-book-open',       badge: null },
+        { id: 'options',   label: 'Service Options', icon: 'bx bx-purchase-tag', badge: null },
+        { id: 'approvals', label: 'Approvals',    icon: 'bx bx-check-shield',    badge: approvalCount ? String(approvalCount) : null },
+        { id: 'changes',   label: 'Change Orders', icon: 'bx bx-git-compare',    badge: changeOrderCount ? String(changeOrderCount) : null },
+        { id: 'reports',   label: 'Reports',      icon: 'bx bx-bar-chart-alt-2', badge: null },
+        { id: 'settings',  label: 'Settings',     icon: 'bx bx-cog',             badge: null },
+    ];
+});
 
 const appSetupsNav = [
     { id: 'suppliers',       label: 'Suppliers',       icon: 'bx bx-store' },
     { id: 'domains',         label: 'Domains',         icon: 'bx bx-shape-square' },
-    { id: 'areas',           label: 'Areas',           icon: 'bx bx-category' },
+    { id: 'areas',           label: 'Areas',           icon: 'bx bx-buildings' },
     { id: 'spaces',          label: 'Spaces',          icon: 'bx bx-map-pin' },
     { id: 'item-groups',     label: 'Item Groups',     icon: 'bx bx-collection' },
     { id: 'item-subgroups',  label: 'Item Subgroups',  icon: 'bx bx-list-plus' },
@@ -108,9 +152,15 @@ async function openRequest(id) {
     }
 }
 const prefilledSku = ref(null);
+const editRequestCode = ref(null);
 function goTo(id, payload = null) {
+    // App Setups / EMS Settings / Security are admin-only — even with the sidebar
+    // links hidden, `activePage` is plain client-side state (including URL-hash
+    // restore), so refuse to land on these views for anyone else.
+    if (sectionOf[id] && !props.permissions.isAdmin) id = 'dash';
     activePage.value = id;
     prefilledSku.value = (id === 'new' && payload?.sku) ? payload.sku : null;
+    editRequestCode.value = (id === 'new' && payload?.editCode) ? payload.editCode : null;
 }
 
 // A request was created/submitted/draft-saved via NewRequestView — its accessors
@@ -121,9 +171,12 @@ function onRequestSaved(navigate = true) {
     router.reload({ only: ['requests', 'people'], onFinish: () => { if (navigate) goTo('requests'); } });
 }
 
-// Requests were bulk-deleted from RequestsView/ApprovalsView — refresh in place.
+// Requests were bulk-deleted, or the user clicked the refresh icon, in
+// RequestsView/ApprovalsView — refresh in place.
+const requestsRefreshing = ref(false);
 function refreshRequests() {
-    router.reload({ only: ['requests'] });
+    requestsRefreshing.value = true;
+    router.reload({ only: ['requests'], onFinish: () => { requestsRefreshing.value = false; } });
 }
 
 // ── User menu ──────────────────────────────────────────────────────────────
@@ -165,7 +218,7 @@ const sectionLabels = {
     permissions: 'Permissions', roles: 'Roles', 'roles-permissions': 'Roles & Permissions', users: 'Users',
 };
 const currentPageLabel = computed(() =>
-    nav.find(n => n.id === activePage.value)?.label
+    nav.value.find(n => n.id === activePage.value)?.label
     || appSetupsNav.find(n => n.id === activePage.value)?.label
     || sectionLabels[activePage.value]
     || ''
@@ -173,7 +226,7 @@ const currentPageLabel = computed(() =>
 
 // ── URL sync — keeps the active view (and open request) across a page refresh ──
 const validPages = new Set([
-    ...nav.map(n => n.id),
+    ...nav.value.map(n => n.id),
     ...appSetupsNav.map(n => n.id),
     'events', 'venues', 'functional-areas',
     'permissions', 'roles', 'roles-permissions', 'users',
@@ -196,32 +249,8 @@ function restoreFromHash() {
         if (id) openRequest(id);
         return;
     }
-    if (validPages.has(raw)) activePage.value = raw;
+    if (validPages.has(raw) && !(sectionOf[raw] && !props.permissions.isAdmin)) activePage.value = raw;
 }
-
-// ── Event selector ──────────────────────────────────────────────────────────
-const STORAGE_KEY = 'mp_active_event_id';
-const availableEvents = ref([]);
-const selectedEventId = ref(Number(localStorage.getItem(STORAGE_KEY)) || props.event?.id || null);
-
-watch(selectedEventId, id => {
-    if (id) localStorage.setItem(STORAGE_KEY, id);
-    else localStorage.removeItem(STORAGE_KEY);
-});
-
-function eventCode(ev) {
-    if (!ev) return '—';
-    if (ev.code) return ev.code;
-    return (ev.name ?? '').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 6) || '—';
-}
-
-const activeEvent = computed(() => {
-    if (!selectedEventId.value || !availableEvents.value.length) return props.event;
-    const found = availableEvents.value.find(e => e.id === selectedEventId.value);
-    if (!found) return props.event;
-    if (found.id === props.event?.id) return props.event;
-    return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null };
-});
 
 // ── Workspace settings ────────────────────────────────────────────────────────
 // Backed by the `settings` DB table and cached in the PHP session (shared into
@@ -241,9 +270,25 @@ async function setApprovalsEnabled(enabled) {
     }
 }
 
+const showItemValues = ref(page.props.settings?.showItemValues ?? false);
+const showItemValuesSaving = ref(false);
+async function setShowItemValues(enabled) {
+    const previous = showItemValues.value;
+    showItemValues.value = enabled;
+    showItemValuesSaving.value = true;
+    try {
+        await axios.put(route('settings.show-item-values.update'), { enabled });
+    } catch (e) {
+        showItemValues.value = previous;
+    } finally {
+        showItemValuesSaving.value = false;
+    }
+}
+
 function selectEvent(id) {
     selectedEventId.value = id;
     userEvtOpen.value = false;
+    persistActiveEvent(id);
 }
 
 const vClickOutside = {
@@ -259,6 +304,7 @@ onMounted(async () => {
         availableEvents.value = data.rows ?? data ?? [];
         if (!selectedEventId.value && availableEvents.value.length) {
             selectedEventId.value = availableEvents.value[0].id;
+            persistActiveEvent(selectedEventId.value);
         }
     } catch (_) {}
 });
@@ -298,7 +344,7 @@ onMounted(async () => {
                 </button>
             </nav>
 
-            <div class="mp-settings">
+            <div v-if="permissions.isAdmin" class="mp-settings">
                 <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('appSetups')">
                     <span>App Setups</span>
                     <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.appSetups }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -317,7 +363,7 @@ onMounted(async () => {
                 </div>
             </div>
 
-            <div class="mp-settings">
+            <div v-if="permissions.isAdmin" class="mp-settings">
                 <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('ems')">
                     <span>EMS Settings</span>
                     <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.ems }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -338,7 +384,7 @@ onMounted(async () => {
                 </div>
             </div>
 
-            <div class="mp-settings">
+            <div v-if="permissions.isAdmin" class="mp-settings">
                 <button class="mp-settings-title mp-settings-title-btn" @click="toggleSection('security')">
                     <span>Security</span>
                     <svg class="mp-settings-chev" :class="{ 'mp-settings-chev-open': openSections.security }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
@@ -489,10 +535,15 @@ onMounted(async () => {
                     :venues="venues"
                     :statuses="statuses"
                     :people="people"
+                    :functional-areas="functionalAreas"
+                    :refreshing="requestsRefreshing"
+                    :show-item-values="showItemValues"
+                    :event="activeEvent"
                     :approval-only="false"
                     @open-request="openRequest"
                     @go-to="goTo"
                     @requests-deleted="refreshRequests"
+                    @refresh="refreshRequests"
                 />
 
                 <ApprovalsView
@@ -502,14 +553,19 @@ onMounted(async () => {
                     :venues="venues"
                     :statuses="statuses"
                     :people="people"
+                    :functional-areas="functionalAreas"
+                    :refreshing="requestsRefreshing"
+                    :show-item-values="showItemValues"
+                    :event="activeEvent"
                     @open-request="openRequest"
                     @go-to="goTo"
                     @requests-deleted="refreshRequests"
+                    @refresh="refreshRequests"
                 />
 
                 <NewRequestView
                     v-else-if="activePage === 'new'"
-                    :key="'new-' + (prefilledSku ?? 'blank')"
+                    :key="'new-' + (editRequestCode ?? prefilledSku ?? 'blank')"
                     :domains="domains"
                     :venues="venues"
                     :catalog="catalog"
@@ -518,8 +574,11 @@ onMounted(async () => {
                     :event="activeEvent"
                     :people="people"
                     :prefill-sku="prefilledSku"
+                    :edit-request-code="editRequestCode"
                     :approvals-enabled="approvalsEnabled"
                     :functional-areas="functionalAreas"
+                    :requests="requests"
+                    :show-item-values="showItemValues"
                     @go-to="goTo"
                     @request-saved="onRequestSaved"
                 />
@@ -621,7 +680,11 @@ onMounted(async () => {
                     :event="activeEvent"
                     :approvals-enabled="approvalsEnabled"
                     :approvals-enabled-saving="approvalsEnabledSaving"
+                    :show-item-values="showItemValues"
+                    :show-item-values-saving="showItemValuesSaving"
                     @update:approvals-enabled="setApprovalsEnabled"
+                    @update:show-item-values="setShowItemValues"
+                    @go-to="goTo"
                 />
 
                 <DetailView
@@ -639,6 +702,7 @@ onMounted(async () => {
                     :suppliers="suppliers"
                     :service-options="serviceOptions"
                     :permissions="permissions"
+                    :show-item-values="showItemValues"
                     @go-to="goTo"
                     @refresh-detail="() => openRequest(detailId)"
                 />

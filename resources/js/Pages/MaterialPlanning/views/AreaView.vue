@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const props = defineProps({
     areas:       Array,
@@ -32,11 +33,12 @@ const rows = computed(() => {
     return r.sort((a, b) => a.sortOrder - b.sortOrder);
 });
 
-// ── New area modal ──────────────────────────────────────────────────────────
+// ── Add / edit area modal ─────────────────────────────────────────────────────
 const showAdd = ref(false);
 const saving = ref(false);
 const error = ref(null);
 const justAdded = ref(null);
+const editingId = ref(null);
 
 function freshForm() {
     return { code: '', label: '', description: '', sortOrder: areaList.value.length + 1, status: defaultStatusId() };
@@ -45,44 +47,79 @@ const form = ref(freshForm());
 const formValid = computed(() => /^[A-Z0-9_]+$/.test(form.value.code) && form.value.label.trim());
 
 function openAdd() {
+    editingId.value = null;
     form.value = freshForm();
+    error.value = null;
+    showAdd.value = true;
+}
+function openEdit(area) {
+    editingId.value = area.id;
+    form.value = {
+        code: area.code,
+        label: area.label,
+        description: area.description || '',
+        sortOrder: area.sortOrder,
+        status: area.statusId,
+    };
     error.value = null;
     showAdd.value = true;
 }
 function closeAdd() { showAdd.value = false; }
 
-async function addArea() {
+async function submitArea() {
     if (!formValid.value || saving.value) return;
     saving.value = true;
     error.value = null;
+    const payload = {
+        code: form.value.code.trim().toUpperCase(),
+        label: form.value.label.trim(),
+        description: form.value.description.trim() || null,
+        sort_order: +form.value.sortOrder || 0,
+        status_id: form.value.status,
+    };
     try {
-        const { data } = await axios.post(route('mp.areas.store'), {
-            code: form.value.code.trim().toUpperCase(),
-            label: form.value.label.trim(),
-            description: form.value.description.trim() || null,
-            sort_order: +form.value.sortOrder || 0,
-            status_id: form.value.status,
-        });
-        areaList.value.push(data);
-        justAdded.value = data.id;
+        if (editingId.value) {
+            const { data } = await axios.put(route('mp.areas.update', editingId.value), payload);
+            const idx = areaList.value.findIndex(a => a.id === editingId.value);
+            if (idx !== -1) areaList.value[idx] = data;
+        } else {
+            const { data } = await axios.post(route('mp.areas.store'), payload);
+            areaList.value.push(data);
+            justAdded.value = data.id;
+            setTimeout(() => { justAdded.value = null; }, 2400);
+        }
         closeAdd();
-        setTimeout(() => { justAdded.value = null; }, 2400);
     } catch (e) {
         error.value = e.response?.status === 403
-            ? "You don't have permission to add an area."
+            ? `You don't have permission to ${editingId.value ? 'edit' : 'add'} an area.`
             : (e.response?.data?.errors?.code?.[0] ?? 'Could not save this area. Please try again.');
     } finally {
         saving.value = false;
     }
 }
 
-async function deleteArea(area) {
-    if (!confirm(`Remove ${area.label}? Spaces assigned to it will block this until reassigned.`)) return;
+// ── Delete area ────────────────────────────────────────────────────────────────
+const confirmDeleteRow = ref(null);
+const deleting = ref(false);
+const deleteError = ref(null);
+function askDelete(area) {
+    confirmDeleteRow.value = area;
+    deleteError.value = null;
+}
+async function confirmDelete() {
+    if (!confirmDeleteRow.value) return;
+    deleting.value = true;
+    deleteError.value = null;
     try {
-        await axios.delete(route('mp.areas.destroy', area.id));
-        areaList.value = areaList.value.filter(a => a.id !== area.id);
+        await axios.delete(route('mp.areas.destroy', confirmDeleteRow.value.id));
+        areaList.value = areaList.value.filter(a => a.id !== confirmDeleteRow.value.id);
+        confirmDeleteRow.value = null;
     } catch (e) {
-        alert(e.response?.status === 403 ? "You don't have permission to remove areas." : 'Could not remove this area — it may still have spaces assigned.');
+        deleteError.value = e.response?.status === 403
+            ? "You don't have permission to remove areas."
+            : 'Could not remove this area — it may still have spaces assigned.';
+    } finally {
+        deleting.value = false;
     }
 }
 
@@ -129,8 +166,9 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <td class="area-desc">{{ a.description || '—' }}</td>
                         <td><span class="status-chip" :style="{ background: statusMeta(a.statusColor).bg, color: statusMeta(a.statusColor).fg }">{{ a.statusName || '—' }}</span></td>
                         <td class="ta-r mono">{{ a.spacesCount }}</td>
-                        <td class="ta-r">
-                            <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteArea(a)">Remove</button>
+                        <td class="ta-r mp-dt-actions">
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEdit(a)"><i class="bx bx-pencil"></i></button>
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-del" title="Delete" @click="askDelete(a)"><i class="bx bx-trash"></i></button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
@@ -149,7 +187,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <header class="skum-hd">
                     <div class="skum-hd-l">
                         <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Areas</span></div>
-                        <h2 class="skum-title">New area</h2>
+                        <h2 class="skum-title">{{ editingId ? 'Edit area' : 'New area' }}</h2>
                         <p class="skum-sub">A broad functional grouping that spaces (Mixed Zone, VVIP Lounge…) belong to.</p>
                     </div>
                     <button class="skum-x" @click="closeAdd" aria-label="Close">
@@ -162,8 +200,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <div class="form-grid">
                             <div class="field">
                                 <label class="field-lbl">Code</label>
-                                <input v-model="form.code" placeholder="e.g. SPORT" class="mono"/>
-                                <span class="field-hint">Letters, numbers, underscores only.</span>
+                                <input v-model="form.code" placeholder="e.g. SPORT" class="mono" :disabled="!!editingId"/>
+                                <span class="field-hint">{{ editingId ? 'Code cannot be changed after creation.' : 'Letters, numbers, underscores only.' }}</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Sort order</label>
@@ -198,12 +236,28 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="addArea">{{ saving ? 'Adding…' : 'Add area' }}</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitArea">
+                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add area') }}
+                        </button>
                     </div>
                 </footer>
             </div>
         </div>
     </Teleport>
+
+    <ConfirmModal
+        v-if="confirmDeleteRow"
+        :title="`Remove ${confirmDeleteRow.label}?`"
+        message="Spaces assigned to it will block this until reassigned."
+        confirm-text="Remove"
+        loading-text="Removing…"
+        :loading="deleting"
+        danger
+        @cancel="confirmDeleteRow = null"
+        @confirm="confirmDelete"
+    >
+        <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+    </ConfirmModal>
 </template>
 
 <style scoped>
@@ -255,6 +309,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
 
+.mp-dt-actions { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
+.mp-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background .15s; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
+
 /* ── Modal shell ──────────────────────────────────────────────────────────── */
 @keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
@@ -303,6 +365,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.field input:disabled { background: #f6f5f1; color: #76706a; cursor: not-allowed; }
 .sel { position: relative; display: flex; align-items: center; }
 .sel select {
     width: 100%; appearance: none; border: 1px solid #e8e4db; border-radius: 7px;

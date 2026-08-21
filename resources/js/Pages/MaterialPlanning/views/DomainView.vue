@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const props = defineProps({
     domains:     Array,
@@ -32,11 +33,12 @@ const rows = computed(() => {
     return r.sort((a, b) => a.sortOrder - b.sortOrder);
 });
 
-// ── New domain modal ────────────────────────────────────────────────────────
+// ── Add / edit domain modal ───────────────────────────────────────────────────
 const showAdd = ref(false);
 const saving = ref(false);
 const error = ref(null);
 const justAdded = ref(null);
+const editingId = ref(null);
 
 function freshForm() {
     return { code: '', label: '', color: '#1d4ed8', chip: '#dbeafe', description: '', sortOrder: domainList.value.length + 1, status: defaultStatusId() };
@@ -45,46 +47,83 @@ const form = ref(freshForm());
 const formValid = computed(() => /^[A-Z0-9_]+$/.test(form.value.code) && form.value.label.trim() && form.value.color && form.value.chip);
 
 function openAdd() {
+    editingId.value = null;
     form.value = freshForm();
+    error.value = null;
+    showAdd.value = true;
+}
+function openEdit(domain) {
+    editingId.value = domain.id;
+    form.value = {
+        code: domain.code,
+        label: domain.label,
+        color: domain.color,
+        chip: domain.chip,
+        description: domain.desc || domain.description || '',
+        sortOrder: domain.sortOrder,
+        status: domain.statusId,
+    };
     error.value = null;
     showAdd.value = true;
 }
 function closeAdd() { showAdd.value = false; }
 
-async function addDomain() {
+async function submitDomain() {
     if (!formValid.value || saving.value) return;
     saving.value = true;
     error.value = null;
+    const payload = {
+        code: form.value.code.trim().toUpperCase(),
+        label: form.value.label.trim(),
+        color: form.value.color,
+        chip: form.value.chip,
+        description: form.value.description.trim() || null,
+        sort_order: +form.value.sortOrder || 0,
+        status_id: form.value.status,
+    };
     try {
-        const { data } = await axios.post(route('mp.domains.store'), {
-            code: form.value.code.trim().toUpperCase(),
-            label: form.value.label.trim(),
-            color: form.value.color,
-            chip: form.value.chip,
-            description: form.value.description.trim() || null,
-            sort_order: +form.value.sortOrder || 0,
-            status_id: form.value.status,
-        });
-        domainList.value.push(data);
-        justAdded.value = data.id;
+        if (editingId.value) {
+            const { data } = await axios.put(route('mp.domains.update', editingId.value), payload);
+            const idx = domainList.value.findIndex(d => d.id === editingId.value);
+            if (idx !== -1) domainList.value[idx] = data;
+        } else {
+            const { data } = await axios.post(route('mp.domains.store'), payload);
+            domainList.value.push(data);
+            justAdded.value = data.id;
+            setTimeout(() => { justAdded.value = null; }, 2400);
+        }
         closeAdd();
-        setTimeout(() => { justAdded.value = null; }, 2400);
     } catch (e) {
         error.value = e.response?.status === 403
-            ? "You don't have permission to add a domain."
+            ? `You don't have permission to ${editingId.value ? 'edit' : 'add'} a domain.`
             : (e.response?.data?.errors?.code?.[0] ?? 'Could not save this domain. Please try again.');
     } finally {
         saving.value = false;
     }
 }
 
-async function deleteDomain(domain) {
-    if (!confirm(`Remove ${domain.label}? Item groups assigned to it will block this until reassigned.`)) return;
+// ── Delete domain ──────────────────────────────────────────────────────────────
+const confirmDeleteRow = ref(null);
+const deleting = ref(false);
+const deleteError = ref(null);
+function askDelete(domain) {
+    confirmDeleteRow.value = domain;
+    deleteError.value = null;
+}
+async function confirmDelete() {
+    if (!confirmDeleteRow.value) return;
+    deleting.value = true;
+    deleteError.value = null;
     try {
-        await axios.delete(route('mp.domains.destroy', domain.id));
-        domainList.value = domainList.value.filter(d => d.id !== domain.id);
+        await axios.delete(route('mp.domains.destroy', confirmDeleteRow.value.id));
+        domainList.value = domainList.value.filter(d => d.id !== confirmDeleteRow.value.id);
+        confirmDeleteRow.value = null;
     } catch (e) {
-        alert(e.response?.status === 403 ? "You don't have permission to remove domains." : 'Could not remove this domain — it may still have item groups assigned.');
+        deleteError.value = e.response?.status === 403
+            ? "You don't have permission to remove domains."
+            : 'Could not remove this domain — it may still have item groups assigned.';
+    } finally {
+        deleting.value = false;
     }
 }
 
@@ -135,8 +174,9 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <td class="area-desc">{{ d.desc || d.description || '—' }}</td>
                         <td><span class="status-chip" :style="{ background: statusMeta(d.statusColor).bg, color: statusMeta(d.statusColor).fg }">{{ d.statusName || '—' }}</span></td>
                         <td class="ta-r mono">{{ d.itemGroupsCount }}</td>
-                        <td class="ta-r">
-                            <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteDomain(d)">Remove</button>
+                        <td class="ta-r mp-dt-actions">
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEdit(d)"><i class="bx bx-pencil"></i></button>
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-del" title="Delete" @click="askDelete(d)"><i class="bx bx-trash"></i></button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
@@ -155,7 +195,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <header class="skum-hd">
                     <div class="skum-hd-l">
                         <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Domains</span></div>
-                        <h2 class="skum-title">New domain</h2>
+                        <h2 class="skum-title">{{ editingId ? 'Edit domain' : 'New domain' }}</h2>
                         <p class="skum-sub">A top-level material category (Overlay, Power, IT…) that item groups belong to.</p>
                     </div>
                     <button class="skum-x" @click="closeAdd" aria-label="Close">
@@ -168,8 +208,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <div class="form-grid">
                             <div class="field">
                                 <label class="field-lbl">Code</label>
-                                <input v-model="form.code" placeholder="e.g. OVR" class="mono"/>
-                                <span class="field-hint">Letters, numbers, underscores only.</span>
+                                <input v-model="form.code" placeholder="e.g. OVR" class="mono" :disabled="!!editingId"/>
+                                <span class="field-hint">{{ editingId ? 'Code cannot be changed after creation.' : 'Letters, numbers, underscores only.' }}</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Sort order</label>
@@ -224,12 +264,28 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="addDomain">{{ saving ? 'Adding…' : 'Add domain' }}</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitDomain">
+                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add domain') }}
+                        </button>
                     </div>
                 </footer>
             </div>
         </div>
     </Teleport>
+
+    <ConfirmModal
+        v-if="confirmDeleteRow"
+        :title="`Remove ${confirmDeleteRow.label}?`"
+        message="Item groups assigned to it will block this until reassigned."
+        confirm-text="Remove"
+        loading-text="Removing…"
+        :loading="deleting"
+        danger
+        @cancel="confirmDeleteRow = null"
+        @confirm="confirmDelete"
+    >
+        <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+    </ConfirmModal>
 </template>
 
 <style scoped>
@@ -284,6 +340,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
 
+.mp-dt-actions { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
+.mp-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background .15s; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
+
 /* ── Modal shell ──────────────────────────────────────────────────────────── */
 @keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
@@ -332,6 +396,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.field input:disabled { background: #f6f5f1; color: #76706a; cursor: not-allowed; }
 
 .color-field { display: flex; align-items: center; gap: 8px; }
 .color-field input[type="color"] { width: 36px; height: 34px; padding: 2px; border: 1px solid #e8e4db; border-radius: 7px; cursor: pointer; flex-shrink: 0; }

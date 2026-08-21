@@ -9,6 +9,7 @@ const props = defineProps({
     venues:       Array,
     people:       Array,
     event:        { type: Object, default: () => ({ code: 'EVT' }) },
+    showItemValues: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['open-request']);
@@ -19,10 +20,19 @@ const domain = ref('all');
 const venue  = ref('all');
 const q      = ref('');
 
-const reasons = computed(() => [...new Set(props.changeOrders.map(r => r.reason))]);
+// Scoped to the active event first — change orders inherit their event from
+// their parent request, same as Requests/Approvals.
+const eventChangeOrders = computed(() =>
+    props.event?.id ? props.changeOrders.filter(co => co.eventId === props.event.id) : props.changeOrders
+);
+const eventRequests = computed(() =>
+    props.event?.id ? props.requests.filter(r => r.eventId === props.event.id) : props.requests
+);
+
+const reasons = computed(() => [...new Set(eventChangeOrders.value.map(r => r.reason))]);
 
 const rows = computed(() => {
-    let r = props.changeOrders.slice();
+    let r = eventChangeOrders.value.slice();
     if (state.value  !== 'all') r = r.filter(x => x.state === state.value);
     if (domain.value !== 'all') r = r.filter(x => x.domain === domain.value);
     if (venue.value  !== 'all') r = r.filter(x => x.venue === venue.value);
@@ -33,18 +43,18 @@ const rows = computed(() => {
     return r;
 });
 
-function countOf(k) { return props.changeOrders.filter(r => r.state === k).length; }
+function countOf(k) { return eventChangeOrders.value.filter(r => r.state === k).length; }
 
-const openOnes = computed(() => props.changeOrders.filter(r => r.state === 'pending'));
+const openOnes = computed(() => eventChangeOrders.value.filter(r => r.state === 'pending'));
 const pendingValue = computed(() => openOnes.value.reduce((s, r) => s + r.delta, 0));
-const appliedDrift = computed(() => props.changeOrders.filter(r => r.state === 'approved').reduce((s, r) => s + r.delta, 0));
-const baseline = computed(() => props.requests.reduce((s, r) => s + r.value, 0));
+const appliedDrift = computed(() => eventChangeOrders.value.filter(r => r.state === 'approved').reduce((s, r) => s + r.delta, 0));
+const baseline = computed(() => eventRequests.value.reduce((s, r) => s + r.value, 0));
 const driftPct = computed(() => baseline.value ? (appliedDrift.value / baseline.value) * 100 : 0);
 
 const byDomain = computed(() => {
     const rows = props.domains.map(d => ({
         ...d,
-        v: props.changeOrders.filter(r => r.state === 'approved' && r.domain === d.code).reduce((s, r) => s + r.delta, 0),
+        v: eventChangeOrders.value.filter(r => r.state === 'approved' && r.domain === d.code).reduce((s, r) => s + r.delta, 0),
     })).filter(x => x.v !== 0);
     return rows;
 });
@@ -149,7 +159,7 @@ function avatarColor(initials) {
 
         <!-- Status chips -->
         <div class="chips">
-            <button class="fchip" :class="{ 'fchip-active': state === 'all' }" @click="state = 'all'">All <span class="fchip-n">{{ changeOrders.length }}</span></button>
+            <button class="fchip" :class="{ 'fchip-active': state === 'all' }" @click="state = 'all'">All <span class="fchip-n">{{ eventChangeOrders.length }}</span></button>
             <button class="fchip" :class="{ 'fchip-active': state === 'pending' }" @click="state = 'pending'">Pending <span class="fchip-n">{{ countOf('pending') }}</span></button>
             <button class="fchip" :class="{ 'fchip-active': state === 'draft' }" @click="state = 'draft'">Draft <span class="fchip-n">{{ countOf('draft') }}</span></button>
             <button class="fchip" :class="{ 'fchip-active': state === 'approved' }" @click="state = 'approved'">Approved <span class="fchip-n">{{ countOf('approved') }}</span></button>
@@ -168,7 +178,7 @@ function avatarColor(initials) {
                         <th>Venue</th>
                         <th>Reason</th>
                         <th class="ta-r">Lines</th>
-                        <th class="ta-r">Δ value</th>
+                        <th v-if="showItemValues" class="ta-r">Δ value</th>
                         <th>Status</th>
                         <th>Stage</th>
                         <th>Raised by</th>
@@ -189,7 +199,7 @@ function avatarColor(initials) {
                         <td><div class="mp-dt-venue">{{ venueOf(r.venue).name }}</div></td>
                         <td class="cox-reason">{{ r.reason }}</td>
                         <td class="ta-r mono">{{ r.rows }}</td>
-                        <td class="ta-r mono" :class="deltaClass(r.delta)">{{ fmtDelta(r.delta) }}</td>
+                        <td v-if="showItemValues" class="ta-r mono" :class="deltaClass(r.delta)">{{ fmtDelta(r.delta) }}</td>
                         <td>
                             <span class="co-pill" :style="{ background: stateMeta(r.state).bg, color: stateMeta(r.state).fg }">
                                 <span class="co-pill-dot" :style="{ background: stateMeta(r.state).dot }"/>
@@ -205,7 +215,7 @@ function avatarColor(initials) {
             </table>
         </div>
         <div class="dt-foot">
-            Showing <b>{{ rows.length }}</b> of {{ changeOrders.length }} change orders · net applied drift
+            Showing <b>{{ rows.length }}</b> of {{ eventChangeOrders.length }} change orders · net applied drift
             <b class="mono" :class="deltaClass(appliedDrift)">{{ fmtDelta(appliedDrift) }}</b>
         </div>
     </div>

@@ -33,6 +33,9 @@ class HandleInertiaRequests extends Middleware
         if (! $request->session()->has('approvals_enabled')) {
             $request->session()->put('approvals_enabled', Setting::get('approvals_enabled', '1') === '1');
         }
+        if (! $request->session()->has('show_item_values')) {
+            $request->session()->put('show_item_values', Setting::get('show_item_values', '0') === '1');
+        }
 
         return [
             ...parent::share($request),
@@ -45,6 +48,7 @@ class HandleInertiaRequests extends Middleware
             ],
             'settings' => [
                 'approvalsEnabled' => fn() => $request->session()->get('approvals_enabled'),
+                'showItemValues' => fn() => $request->session()->get('show_item_values'),
             ],
         ];
     }

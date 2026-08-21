@@ -18,6 +18,8 @@ use App\Models\MaterialPlanning\ServiceOption;
 use App\Models\MaterialPlanning\Space;
 use App\Models\MaterialPlanning\Supplier;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -107,9 +109,14 @@ class MaterialPlanningController extends Controller
             return ['id' => $u->id, 'initials' => $u->initials, 'name' => $u->name, 'role' => $role, 'org' => 'HQ'];
         })->values()->all();
 
-        // Default active event: whichever real event Material Planning demo data is
-        // actually attached to, falling back to the most recently created real event.
-        $event = Event::whereHas('materialRequests')->latest('id')->first()
+        // Active event is whatever the user last selected in this session (see
+        // setActiveEvent()). If nothing has been picked yet, fall back to whichever
+        // real event Material Planning demo data is actually attached to, then the
+        // most recently created real event.
+        $event = ($sessionEventId = session('mp_active_event_id'))
+            ? Event::find($sessionEventId)
+            : null;
+        $event ??= Event::whereHas('materialRequests')->latest('id')->first()
             ?? Event::latest('id')->first();
 
         return Inertia::render('MaterialPlanning/Index', [
@@ -212,14 +219,16 @@ class MaterialPlanningController extends Controller
 
             'functionalAreas' => $functionalAreas->map(fn (FunctionalArea $fa) => [
                 'id' => $fa->id,
+                'code' => $fa->fa_code,
                 'title' => $fa->title,
             ])->values()->all(),
 
             'requests' => $requests->map(fn (MaterialRequest $r) => [
                 'id' => $r->code,
+                'eventId' => $r->event_id,
                 'title' => $r->title,
                 'venue' => $r->venue?->short_name,
-                'functionalArea' => $r->functionalArea?->title,
+                'functionalArea' => $r->functionalArea?->fa_code,
                 'site' => $r->site_name,
                 'domain' => $r->domain,
                 'status' => $r->status,
@@ -230,6 +239,7 @@ class MaterialPlanningController extends Controller
                 'updated' => $r->updated,
                 'owner' => $r->owner?->initials,
                 'priority' => $r->priority,
+                'hasServiceOption' => $r->lines->contains(fn ($l) => $l->service_option_id !== null),
             ])->values()->all(),
 
             'catalog' => $catalogItems->map(fn (CatalogItem $c) => [
@@ -289,6 +299,7 @@ class MaterialPlanningController extends Controller
 
             'changeOrders' => $changeOrders->map(fn (ChangeOrder $co) => [
                 'id' => $co->code,
+                'eventId' => $co->request?->event_id,
                 'req' => $co->request?->code,
                 'context' => $co->context,
                 'venue' => $co->request?->venue?->short_name,
@@ -308,5 +319,17 @@ class MaterialPlanningController extends Controller
 
             'permissions' => $permissions,
         ]);
+    }
+
+    /** Persists the user's chosen active event server-side so it survives reloads/devices instead of living only in localStorage. */
+    public function setActiveEvent(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'event_id' => 'required|integer|exists:events,id',
+        ]);
+
+        session(['mp_active_event_id' => $validated['event_id']]);
+
+        return response()->json(['ok' => true]);
     }
 }

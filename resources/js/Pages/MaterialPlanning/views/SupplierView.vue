@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const props = defineProps({
     suppliers:       Array,
@@ -46,11 +47,12 @@ const kpi = computed(() => ({
     noMsa: supplierList.value.filter(s => s.msa === '—').length,
 }));
 
-// ── New supplier modal ──────────────────────────────────────────────────────
+// ── Add / edit supplier modal ─────────────────────────────────────────────────
 const showAdd = ref(false);
 const saving = ref(false);
 const error = ref(null);
 const justAdded = ref(null);
+const editingId = ref(null);
 
 function freshForm() {
     return { name: '', kind: '', classification: defaultClassificationId(), status: defaultStatusId(), msa: '', contactName: '', contactPhone: '' };
@@ -59,46 +61,83 @@ const form = ref(freshForm());
 const formValid = computed(() => form.value.name.trim() && form.value.kind.trim());
 
 function openAdd() {
+    editingId.value = null;
     form.value = freshForm();
+    error.value = null;
+    showAdd.value = true;
+}
+function openEdit(supplier) {
+    editingId.value = supplier.id;
+    form.value = {
+        name: supplier.name,
+        kind: supplier.kind,
+        classification: supplier.classificationId,
+        status: supplier.statusId,
+        msa: supplier.msa === '—' ? '' : (supplier.msa || ''),
+        contactName: supplier.contactName || '',
+        contactPhone: supplier.contactPhone || '',
+    };
     error.value = null;
     showAdd.value = true;
 }
 function closeAdd() { showAdd.value = false; }
 
-async function addSupplier() {
+async function submitSupplier() {
     if (!formValid.value || saving.value) return;
     saving.value = true;
     error.value = null;
+    const payload = {
+        name: form.value.name.trim(),
+        kind: form.value.kind.trim(),
+        classification_id: form.value.classification,
+        status_id: form.value.status,
+        msa_reference: form.value.msa.trim() || null,
+        contact_name: form.value.contactName.trim() || null,
+        contact_phone: form.value.contactPhone.trim() || null,
+    };
     try {
-        const { data } = await axios.post(route('mp.suppliers.store'), {
-            name: form.value.name.trim(),
-            kind: form.value.kind.trim(),
-            classification_id: form.value.classification,
-            status_id: form.value.status,
-            msa_reference: form.value.msa.trim() || null,
-            contact_name: form.value.contactName.trim() || null,
-            contact_phone: form.value.contactPhone.trim() || null,
-        });
-        supplierList.value.unshift(data);
-        justAdded.value = data.id;
+        if (editingId.value) {
+            const { data } = await axios.put(route('mp.suppliers.update', editingId.value), payload);
+            const idx = supplierList.value.findIndex(s => s.id === editingId.value);
+            if (idx !== -1) supplierList.value[idx] = data;
+        } else {
+            const { data } = await axios.post(route('mp.suppliers.store'), payload);
+            supplierList.value.unshift(data);
+            justAdded.value = data.id;
+            setTimeout(() => { justAdded.value = null; }, 2400);
+        }
         closeAdd();
-        setTimeout(() => { justAdded.value = null; }, 2400);
     } catch (e) {
         error.value = e.response?.status === 403
-            ? "You don't have permission to add a supplier."
+            ? `You don't have permission to ${editingId.value ? 'edit' : 'add'} a supplier.`
             : (e.response?.data?.errors?.name?.[0] ?? 'Could not save this supplier. Please try again.');
     } finally {
         saving.value = false;
     }
 }
 
-async function deleteSupplier(supplier) {
-    if (!confirm(`Remove ${supplier.name}?`)) return;
+// ── Delete supplier ───────────────────────────────────────────────────────────
+const confirmDeleteRow = ref(null);
+const deleting = ref(false);
+const deleteError = ref(null);
+function askDelete(supplier) {
+    confirmDeleteRow.value = supplier;
+    deleteError.value = null;
+}
+async function confirmDelete() {
+    if (!confirmDeleteRow.value) return;
+    deleting.value = true;
+    deleteError.value = null;
     try {
-        await axios.delete(route('mp.suppliers.destroy', supplier.id));
-        supplierList.value = supplierList.value.filter(s => s.id !== supplier.id);
+        await axios.delete(route('mp.suppliers.destroy', confirmDeleteRow.value.id));
+        supplierList.value = supplierList.value.filter(s => s.id !== confirmDeleteRow.value.id);
+        confirmDeleteRow.value = null;
     } catch (e) {
-        alert(e.response?.status === 403 ? "You don't have permission to remove suppliers." : 'Could not remove this supplier.');
+        deleteError.value = e.response?.status === 403
+            ? "You don't have permission to remove suppliers."
+            : 'Could not remove this supplier.';
+    } finally {
+        deleting.value = false;
     }
 }
 
@@ -184,8 +223,9 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <div v-if="s.contactPhone" class="sup-contact-phone mono">{{ s.contactPhone }}</div>
                         </td>
                         <td class="ta-r mono">{{ s.avgLeadDays !== null ? s.avgLeadDays + ' d' : '—' }}</td>
-                        <td class="ta-r">
-                            <button v-if="permissions.isAdmin" class="mp-btn mp-btn-sm" @click="deleteSupplier(s)">Remove</button>
+                        <td class="ta-r mp-dt-actions">
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEdit(s)"><i class="bx bx-pencil"></i></button>
+                            <button v-if="permissions.isAdmin" class="mp-icon-btn mp-icon-del" title="Delete" @click="askDelete(s)"><i class="bx bx-trash"></i></button>
                         </td>
                     </tr>
                     <tr v-if="!rows.length">
@@ -204,7 +244,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <header class="skum-hd">
                     <div class="skum-hd-l">
                         <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Suppliers</span></div>
-                        <h2 class="skum-title">New supplier</h2>
+                        <h2 class="skum-title">{{ editingId ? 'Edit supplier' : 'New supplier' }}</h2>
                         <p class="skum-sub">Register a framework supplier that can back a catalog item's service options.</p>
                     </div>
                     <button class="skum-x" @click="closeAdd" aria-label="Close">
@@ -266,12 +306,27 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="addSupplier">{{ saving ? 'Adding…' : 'Add supplier' }}</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitSupplier">
+                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add supplier') }}
+                        </button>
                     </div>
                 </footer>
             </div>
         </div>
     </Teleport>
+
+    <ConfirmModal
+        v-if="confirmDeleteRow"
+        :title="`Remove ${confirmDeleteRow.name}?`"
+        confirm-text="Remove"
+        loading-text="Removing…"
+        :loading="deleting"
+        danger
+        @cancel="confirmDeleteRow = null"
+        @confirm="confirmDelete"
+    >
+        <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+    </ConfirmModal>
 </template>
 
 <style scoped>
@@ -353,6 +408,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .dt-foot { font-size: 12px; color: #76706a; text-align: right; margin: 8px 0 16px; }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
+
+.mp-dt-actions { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
+.mp-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background .15s; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
 /* ── Modal shell ──────────────────────────────────────────────────────────── */
 @keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }

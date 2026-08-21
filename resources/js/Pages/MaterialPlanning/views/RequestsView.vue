@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import RefreshButton from '../components/RefreshButton.vue';
 
 const props = defineProps({
     requests:    Array,
@@ -10,19 +11,29 @@ const props = defineProps({
     statuses:    Object,
     approvalOnly: { type: Boolean, default: false },
     people:      Array,
+    functionalAreas: { type: Array, default: () => [] },
+    refreshing:  { type: Boolean, default: false },
+    showItemValues: { type: Boolean, default: false },
+    event:       { type: Object, default: null },
 });
 
-const emit = defineEmits(['open-request', 'go-to', 'requests-deleted']);
+const emit = defineEmits(['open-request', 'go-to', 'requests-deleted', 'refresh']);
 
 // ── Local state ───────────────────────────────────────────────────────────────
 const reqFilter = ref('all');
 const reqDomain = ref('all');
 const reqVenue  = ref('all');
+const reqFA     = ref('all');
 const reqSearch = ref('');
 
 // ── Selection & bulk delete ──────────────────────────────────────────────────
 const selectedIds = ref(new Set());
-watch(() => props.requests, () => { selectedIds.value = new Set(); });
+watch(() => props.requests, () => {
+    selectedIds.value = new Set();
+    expandedIds.value = new Set();
+    expandedData.value = {};
+    expandedError.value = {};
+});
 
 function toggleRow(id) {
     const next = new Set(selectedIds.value);
@@ -33,6 +44,39 @@ function toggleSelectAll() {
     selectedIds.value = allSelected.value
         ? new Set()
         : new Set(filteredRequests.value.map(r => r.id));
+}
+
+// ── Expand row to show line items ────────────────────────────────────────────
+const expandedIds = ref(new Set());
+const expandedData = ref({});   // code -> detail response ({ lines: [...] })
+const expandedLoading = ref(new Set());
+const expandedError = ref({});  // code -> error message
+
+async function toggleExpand(r) {
+    const next = new Set(expandedIds.value);
+    if (next.has(r.id)) {
+        next.delete(r.id);
+        expandedIds.value = next;
+        return;
+    }
+    next.add(r.id);
+    expandedIds.value = next;
+
+    if (expandedData.value[r.id] || expandedLoading.value.has(r.id)) return;
+
+    const loading = new Set(expandedLoading.value);
+    loading.add(r.id);
+    expandedLoading.value = loading;
+    try {
+        const { data } = await axios.get(route('mp.requests.show', r.id));
+        expandedData.value = { ...expandedData.value, [r.id]: data };
+    } catch (e) {
+        expandedError.value = { ...expandedError.value, [r.id]: 'Could not load items for this request.' };
+    } finally {
+        const done = new Set(expandedLoading.value);
+        done.delete(r.id);
+        expandedLoading.value = done;
+    }
 }
 
 const showDeleteConfirm = ref(false);
@@ -74,12 +118,19 @@ const statusFilters = [
     { key: 'approved',  label: 'Approved' },
 ];
 
+// Scoped to the active event first — everything else (status chips, filters,
+// counts) operates on this, not the raw `requests` prop, which spans every event.
+const eventRequests = computed(() =>
+    props.event?.id ? props.requests.filter(r => r.eventId === props.event.id) : props.requests
+);
+
 const filteredRequests = computed(() => {
-    let rows = props.requests.slice();
+    let rows = eventRequests.value.slice();
     if (props.approvalOnly) rows = rows.filter(r => ['submitted','l1','l2','finance','changed'].includes(r.status));
     if (reqFilter.value !== 'all') rows = rows.filter(r => r.status === reqFilter.value);
     if (reqDomain.value !== 'all') rows = rows.filter(r => r.domain === reqDomain.value);
     if (reqVenue.value  !== 'all') rows = rows.filter(r => r.venue  === reqVenue.value);
+    if (reqFA.value     !== 'all') rows = rows.filter(r => r.functionalArea === reqFA.value);
     if (reqSearch.value) {
         const q = reqSearch.value.toLowerCase();
         rows = rows.filter(r => r.title.toLowerCase().includes(q) || r.id.toLowerCase().includes(q));
@@ -93,7 +144,7 @@ const allSelected = computed(() =>
 const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.value);
 
 const statusCounts = computed(() => {
-    const r = props.requests;
+    const r = eventRequests.value;
     return {
         all:       r.length,
         submitted: r.filter(x => x.status === 'submitted').length,
@@ -104,8 +155,6 @@ const statusCounts = computed(() => {
         approved:  r.filter(x => x.status === 'approved').length,
     };
 });
-
-const priorityColors = { Critical: '#991b1b', High: '#b45309', Medium: '#6b7280', Low: '#9ca3af' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
@@ -125,10 +174,12 @@ function avatarColor(initials) {
             <div>
                 <h1 class="mp-page-title">{{ approvalOnly ? 'Approvals' : 'Requests' }}</h1>
                 <p class="mp-page-sub">
-                    {{ approvalOnly ? 'Items routed to you across L1, Category and Finance gates.' : 'All material requests for this event. Click any row to open.' }}
+                    <template v-if="approvalOnly">{{ filteredRequests.length }} items routed to you across L1, Category and Finance gates.</template>
+                    <template v-else>{{ eventRequests.length }} material request{{ eventRequests.length === 1 ? '' : 's' }} for this event. Click any row to open.</template>
                 </p>
             </div>
             <div class="mp-head-actions">
+                <RefreshButton :refreshing="refreshing" @click="emit('refresh')"/>
                 <button class="mp-btn"><i class="bx bx-filter-alt"></i> Saved views</button>
                 <button class="mp-btn"><i class="bx bx-download"></i> Export CSV</button>
                 <button class="mp-btn mp-btn-primary" @click="emit('go-to', 'new')"><i class="bx bx-plus"></i> New request</button>
@@ -142,7 +193,6 @@ function avatarColor(initials) {
             <div class="mp-ab-stat"><div class="mp-ab-n">$412,810</div><div class="mp-ab-l">pending value</div></div>
             <div class="mp-ab-stat mp-ab-warn"><div class="mp-ab-n">3</div><div class="mp-ab-l">past 48h SLA</div></div>
             <div class="mp-ab-actions">
-                <button class="mp-btn mp-btn-sm">Bulk approve…</button>
                 <button class="mp-btn mp-btn-primary mp-btn-sm">Open next →</button>
             </div>
         </div>
@@ -165,6 +215,13 @@ function avatarColor(initials) {
                 <select v-model="reqVenue">
                     <option value="all">All venues</option>
                     <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
+                </select>
+            </div>
+            <div class="mp-fb-sel">
+                <label>Functional Area</label>
+                <select v-model="reqFA">
+                    <option value="all">All</option>
+                    <option v-for="fa in functionalAreas" :key="fa.id" :value="fa.code">{{ fa.code }}</option>
                 </select>
             </div>
             <div class="mp-fb-sel">
@@ -200,6 +257,7 @@ function avatarColor(initials) {
         <div v-if="selectedIds.size > 0" class="mp-bulkbar">
             <span class="mp-bulkbar-n">{{ selectedIds.size }} selected</span>
             <button class="mp-btn mp-btn-sm" @click="selectedIds = new Set()">Clear</button>
+            <button v-if="approvalOnly" class="mp-btn mp-btn-primary mp-btn-sm">Bulk approve…</button>
             <button class="mp-btn mp-btn-danger mp-btn-sm" @click="confirmDeleteSelected">
                 <i class="bx bx-trash"></i> Delete
             </button>
@@ -226,36 +284,35 @@ function avatarColor(initials) {
                     <tr>
                         <th><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleSelectAll"/></th>
                         <th>ID</th>
-                        <th>Domain</th>
                         <th>Venue · Site</th>
                         <th class="ta-c">Items</th>
-                        <th class="ta-c">Value</th>
+                        <th v-if="showItemValues" class="ta-c">Value</th>
                         <th>Status</th>
-                        <th>Priority</th>
+                        <th>Functional Area</th>
                         <th>Owner</th>
                         <th>Updated</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
+                    <template v-for="r in filteredRequests" :key="r.id">
                     <tr
-                        v-for="r in filteredRequests" :key="r.id"
                         class="mp-dt-row"
-                        @click="emit('open-request', r.id)"
+                        :class="{ 'mp-dt-row-expanded': expandedIds.has(r.id) }"
+                        @click="toggleExpand(r)"
                     >
                         <td @click.stop><input type="checkbox" :checked="selectedIds.has(r.id)" @change="toggleRow(r.id)"/></td>
-                        <td class="mono mp-dt-id">{{ r.id }}</td>
-                        <td>
-                            <span class="mp-dtag" :style="{ background: domainOf(r.domain).chip, color: domainOf(r.domain).color }">
-                                <b>{{ r.domain }}</b>
-                            </span>
+                        <td class="mono mp-dt-id">
+                            <i class="bx mp-dt-chevron" :class="expandedIds.has(r.id) ? 'bx-chevron-down' : 'bx-chevron-right'"></i>
+                            {{ r.id }}
+                            <i v-if="r.hasServiceOption" class="bx bxs-truck mp-dt-svc-mark" title="One or more items has a service assigned"></i>
                         </td>
                         <td>
                             <div class="mp-dt-venue">{{ venueOf(r.venue).name }}</div>
                             <div class="mp-dt-site">{{ r.site }}</div>
                         </td>
                         <td class="ta-c mono">{{ r.items }}</td>
-                        <td class="ta-c mono">{{ fmtMoney(r.value) }}</td>
+                        <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(r.value) }}</td>
                         <td>
                             <span class="mp-pill" :style="{ background: statuses[r.status]?.bg, color: statuses[r.status]?.fg }">
                                 <span class="mp-pill-dot" :style="{ background: statuses[r.status]?.dot }"/>
@@ -263,22 +320,65 @@ function avatarColor(initials) {
                             </span>
                         </td>
                         <td>
-                            <span class="mp-prio">
-                                <span class="mp-prio-dot" :style="{ background: priorityColors[r.priority] }"/>
-                                {{ r.priority }}
-                            </span>
+                            <span v-if="r.functionalArea" class="mp-fa-tag">{{ r.functionalArea }}</span>
+                            <span v-else class="mp-muted">—</span>
                         </td>
                         <td>
                             <span class="mp-avatar mp-avatar-sm" :style="{ background: avatarColor(r.owner) }">{{ r.owner }}</span>
                         </td>
                         <td class="mp-dt-when">{{ r.updated }}</td>
-                        <td class="mp-dt-go">→</td>
+                        <td class="mp-dt-go" @click.stop>
+                            <button
+                                v-if="r.status === 'draft'"
+                                class="mp-icon-btn mp-icon-edit"
+                                title="Edit draft"
+                                @click="emit('go-to', 'new', { editCode: r.id })"
+                            ><i class="bx bx-pencil"></i></button>
+                            <button
+                                class="mp-icon-btn"
+                                title="Open full detail"
+                                @click="emit('open-request', r.id)"
+                            ><i class="bx bx-link-external"></i></button>
+                        </td>
                     </tr>
+                    <tr v-if="expandedIds.has(r.id)" class="mp-dt-expand-row">
+                        <td colspan="10">
+                            <div v-if="expandedLoading.has(r.id)" class="mp-dt-expand-status">Loading items…</div>
+                            <div v-else-if="expandedError[r.id]" class="mp-dt-expand-status mp-dt-expand-error">{{ expandedError[r.id] }}</div>
+                            <div v-else-if="!expandedData[r.id]?.lines?.length" class="mp-dt-expand-status">No line items on this request.</div>
+                            <table v-else class="mp-dt-expand-table">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th><th>Item</th><th>Domain</th><th class="ta-c">Qty</th><th>Unit</th>
+                                        <th v-if="showItemValues" class="ta-c">Rate</th><th v-if="showItemValues" class="ta-c">Total</th><th>Service option</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="l in expandedData[r.id].lines" :key="l.id">
+                                        <td class="mono">{{ l.sku }}</td>
+                                        <td>{{ l.name }}</td>
+                                        <td>
+                                            <span v-if="l.domain" class="mp-dtag" :style="{ background: domainOf(l.domain).chip, color: domainOf(l.domain).color }">
+                                                <b>{{ l.domain }}</b>
+                                            </span>
+                                            <span v-else class="mp-muted">—</span>
+                                        </td>
+                                        <td class="ta-c mono">{{ l.qty }}</td>
+                                        <td class="mono">{{ l.unit }}</td>
+                                        <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(l.rate) }}</td>
+                                        <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(l.value) }}</td>
+                                        <td>{{ l.serviceOptionName || '—' }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                    </template>
                 </tbody>
             </table>
         </div>
         <div class="mp-dt-foot">
-            Showing <b>{{ filteredRequests.length }}</b> of {{ requests.length }} requests
+            Showing <b>{{ filteredRequests.length }}</b> of {{ eventRequests.length }} requests
         </div>
     </div>
 </template>
@@ -328,7 +428,7 @@ function avatarColor(initials) {
 .mp-ab-actions { display: flex; gap: 8px; margin-left: auto; }
 
 .mp-filterbar {
-    display: grid; grid-template-columns: 1.6fr repeat(4, 1fr);
+    display: grid; grid-template-columns: 1.6fr repeat(5, 1fr);
     gap: 8px; margin-bottom: 12px;
 }
 .mp-fb-search {
@@ -373,8 +473,28 @@ function avatarColor(initials) {
 .mp-dt-venue { font-size: 13px; }
 .mp-dt-site { font-size: 11px; color: #76706a; }
 .mp-dt-when { font-size: 12px; color: #76706a; }
-.mp-dt-go { color: #76706a; font-size: 13px; }
+.mp-dt-go { color: #76706a; font-size: 13px; text-align: right; display: flex; gap: 4px; justify-content: flex-end; }
+.mp-icon-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid #e8e4db; background: #fff; color: #76706a; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; transition: background .15s; }
+.mp-icon-btn:hover { background: #fbfaf6; color: #1a1614; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
 .mp-dt-foot { font-size: 12px; color: #76706a; text-align: right; margin-top: 8px; }
+
+.mp-dt-chevron { font-size: 15px; vertical-align: -2px; margin-right: 2px; color: #a39d96; }
+.mp-dt-svc-mark { font-size: 13px; vertical-align: -1px; margin-left: 5px; color: #0f766e; }
+.mp-dt-row-expanded td { background: #fbfaf6; }
+.mp-dt-expand-row td { padding: 0; border-bottom: 1px solid #f3f0ea; }
+.mp-dt-expand-status { padding: 16px 24px; font-size: 12.5px; color: #76706a; }
+.mp-dt-expand-error { color: #991b1b; }
+.mp-dt-expand-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fbfaf6; }
+.mp-dt-expand-table th {
+    background: #f3f0e8; color: #76706a; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+    padding: 7px 24px; text-align: left; white-space: nowrap;
+}
+.mp-dt-expand-table th.ta-c { text-align: center; }
+.mp-dt-expand-table td { padding: 8px 24px; border-top: 1px solid #efece4; color: #1a1614; }
+.mp-dt-expand-table td.ta-c { text-align: center; }
+.mp-dt-expand-table td:first-child, .mp-dt-expand-table th:first-child { padding-left: 24px; }
 
 .mp-dtag {
     display: inline-flex; align-items: center; gap: 4px;
@@ -386,8 +506,8 @@ function avatarColor(initials) {
     padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 600;
 }
 .mp-pill-dot { width: 6px; height: 6px; border-radius: 50%; }
-.mp-prio { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
-.mp-prio-dot { width: 7px; height: 7px; border-radius: 50%; }
+.mp-fa-tag { font-size: 12px; color: #3d3833; background: #f6f5f1; padding: 2px 8px; border-radius: 5px; }
+.mp-muted { color: #a39d96; font-size: 12px; }
 .mp-avatar {
     display: inline-flex; align-items: center; justify-content: center;
     width: 28px; height: 28px; border-radius: 50%;

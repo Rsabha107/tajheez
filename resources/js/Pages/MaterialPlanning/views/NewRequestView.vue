@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import DateField from '../components/DateField.vue';
+import CopyFromRequestModal from '../components/CopyFromRequestModal.vue';
 
 const props = defineProps({
     domains:    Array,
@@ -14,6 +15,9 @@ const props = defineProps({
     prefillSku: { type: String, default: null },
     approvalsEnabled: { type: Boolean, default: true },
     functionalAreas: { type: Array, default: () => [] },
+    editRequestCode: { type: String, default: null },
+    requests:   { type: Array, default: () => [] },
+    showItemValues: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['go-to', 'request-saved']);
@@ -48,7 +52,63 @@ function scrollToRouting() {
     routingCard.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ── Editing an existing draft ──────────────────────────────────────────────────
+const isEditMode = ref(!!props.editRequestCode);
+const loadingDraft = ref(false);
+
+async function loadDraft(code) {
+    loadingDraft.value = true;
+    error.value = null;
+    try {
+        const { data } = await axios.get(route('mp.requests.show', code));
+        createdRequestId.value = data.id;
+        createdRequestCode.value = data.code;
+        savedLayoutFileName.value = data.layoutFileName;
+
+        form.value = {
+            title: data.title || '',
+            venue: data.venueId || '',
+            functionalArea: data.functionalAreaId || '',
+            siteType: data.siteType || '',
+            siteCode: data.siteCode || '',
+            siteName: data.site || '',
+            area: props.areas.find(a => a.label === data.lsCategory)?.id || '',
+            space: data.lsCode || '',
+            lsName: data.lsName || '',
+            lsCode: data.lsCode || '',
+            baseRoom: data.baseRoom || 'No',
+            moveIn: data.moveIn || '',
+            moveOut: data.moveOut || '',
+            priority: data.priority || 'Medium',
+            approver: data.approverRouting || 'Auto-route (multi-step)',
+            notes: data.notes || '',
+        };
+
+        formLines.value = (data.lines || []).map(line => {
+            const catalogItem = props.catalog.find(c => c.sku === line.sku);
+            return {
+                id: nextLineId++,
+                backendId: line.id,
+                domain: catalogItem?.domain || line.domain || 'IT',
+                group: catalogItem?.group || '',
+                sub: catalogItem?.sub || '',
+                sku: line.sku,
+                qty: line.qty,
+                comment: line.comment || '',
+            };
+        });
+    } catch (e) {
+        error.value = 'Could not load this draft. Please try again.';
+    } finally {
+        loadingDraft.value = false;
+    }
+}
+
 onMounted(() => {
+    if (props.editRequestCode) {
+        loadDraft(props.editRequestCode);
+        return;
+    }
     if (!props.prefillSku) return;
     const item = props.catalog.find(c => c.sku === props.prefillSku);
     if (!item) return;
@@ -99,6 +159,16 @@ function isLowStock(line) {
 function addLine() {
     formLines.value.push({ id: nextLineId++, backendId: null, domain: 'IT', group: '', sub: '', sku: '', qty: 1, comment: '' });
 }
+
+// ── Copy items from a previous request ────────────────────────────────────────
+const showCopyFrom = ref(false);
+function onLinesCopied(lines) {
+    for (const l of lines) {
+        formLines.value.push({ id: nextLineId++, backendId: null, ...l });
+    }
+    showCopyFrom.value = false;
+}
+
 const removedLineIds = ref([]);
 function removeLine(id) {
     const line = formLines.value.find(l => l.id === id);
@@ -230,7 +300,7 @@ async function persist(shouldSubmit) {
     <div class="mp-page">
         <div class="mp-page-head">
             <div>
-                <h1 class="mp-page-title">New material request</h1>
+                <h1 class="mp-page-title">{{ isEditMode ? 'Edit material request' : 'New material request' }}</h1>
                 <p class="mp-page-sub">
                     <template v-if="createdRequestCode">
                         Draft <span class="mono">{{ createdRequestCode }}</span><span v-if="lastSavedAt"> · saved {{ lastSavedAt.toLocaleTimeString() }}</span>
@@ -239,12 +309,13 @@ async function persist(shouldSubmit) {
                 </p>
             </div>
             <div class="mp-head-actions">
-                <button class="mp-btn" :disabled="saving || !canSave" @click="persist(false)">{{ saving ? 'Saving…' : 'Save draft' }}</button>
+                <button class="mp-btn" :disabled="saving || loadingDraft || !canSave" @click="persist(false)">{{ saving ? 'Saving…' : 'Save draft' }}</button>
                 <button class="mp-btn" @click="scrollToRouting">Preview routing</button>
-                <button class="mp-btn mp-btn-primary" :disabled="saving || !canSave" @click="persist(true)">{{ saving ? 'Saving…' : 'Submit for approval' }}</button>
+                <button class="mp-btn mp-btn-primary" :disabled="saving || loadingDraft || !canSave" @click="persist(true)">{{ saving ? 'Saving…' : 'Submit for approval' }}</button>
             </div>
         </div>
 
+        <div v-if="loadingDraft" class="mp-banner">Loading draft…</div>
         <div v-if="error" class="mp-banner mp-banner-error">{{ error }}</div>
         <div v-if="!canSave" class="mp-banner mp-banner-warn">No active event selected — pick one from the sidebar before saving a request.</div>
 
@@ -255,12 +326,6 @@ async function persist(shouldSubmit) {
                 <div class="mp-card-sub">All requests are scoped to one site within the active event.</div>
             </div>
             <div class="mp-form-grid">
-                <div class="mp-field">
-                    <label>Event <span class="mp-req">*</span></label>
-                    <div class="mp-static-field">
-                        {{ event?.name || '— No active event —' }}<span v-if="event?.code"> ({{ event.code }})</span>
-                    </div>
-                </div>
                 <div class="mp-field">
                     <label>Venue <span class="mp-req">*</span></label>
                     <select v-model="form.venue">
@@ -347,14 +412,17 @@ async function persist(shouldSubmit) {
         <div class="mp-card">
             <div class="mp-card-head">
                 <h3 class="mp-card-title">Items <span class="mp-req">*</span></h3>
-                <div class="mp-card-sub">{{ formLines.length }} lines · estimated <b class="mono">{{ fmtMoney(formTotal) }}</b></div>
+                <div class="mp-card-sub">
+                    {{ formLines.length }} lines
+                    <template v-if="showItemValues"> · estimated <b class="mono">{{ fmtMoney(formTotal) }}</b></template>
+                </div>
             </div>
-            <div class="mp-ir-head">
+            <div class="mp-ir-head" :class="{ 'mp-ir-no-value': !showItemValues }">
                 <div>Domain</div><div>Group</div><div>Sub-group</div><div>Item</div>
-                <div class="ta-r">Qty</div><div class="ta-r">Line total</div><div>Comment</div><div></div>
+                <div class="ta-r">Qty</div><div v-if="showItemValues" class="ta-r">Line total</div><div>Comment</div><div></div>
             </div>
             <div class="mp-ir-body">
-                <div v-for="l in formLines" :key="l.id" class="mp-ir">
+                <div v-for="l in formLines" :key="l.id" class="mp-ir" :class="{ 'mp-ir-no-value': !showItemValues }">
                     <select :value="l.domain" @change="updateLine(l.id,'domain',$event.target.value)">
                         <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
                     </select>
@@ -375,8 +443,10 @@ async function persist(shouldSubmit) {
                             <span class="mono">{{ lineItem(l).sku }}</span>
                             <span>·</span>
                             <span>{{ lineItem(l).unit }}</span>
-                            <span>·</span>
-                            <span class="mono">{{ fmtMoney(lineItem(l).rate) }}</span>
+                            <template v-if="showItemValues">
+                                <span>·</span>
+                                <span class="mono">{{ fmtMoney(lineItem(l).rate) }}</span>
+                            </template>
                             <span>·</span>
                             <span :class="isLowStock(l) ? 'mp-ir-stock-low' : 'mp-ir-stock-ok'">
                                 {{ isLowStock(l) ? 'tight stock' : 'in stock' }} {{ lineItem(l).stock }}
@@ -384,7 +454,7 @@ async function persist(shouldSubmit) {
                         </div>
                     </div>
                     <input type="number" :value="l.qty" @input="updateLine(l.id,'qty',+$event.target.value)" min="0"/>
-                    <div class="mono ta-r mp-ir-total">{{ lineItem(l) ? fmtMoney(lineItem(l).rate * l.qty) : '—' }}</div>
+                    <div v-if="showItemValues" class="mono ta-r mp-ir-total">{{ lineItem(l) ? fmtMoney(lineItem(l).rate * l.qty) : '—' }}</div>
                     <input :value="l.comment" @input="updateLine(l.id,'comment',$event.target.value)" placeholder="Comment (location, spec, deadline…)"/>
                     <button class="mp-ir-x" title="Remove line" @click="removeLine(l.id)">×</button>
                 </div>
@@ -393,13 +463,22 @@ async function persist(shouldSubmit) {
             <div class="mp-ir-foot">
                 <button class="mp-btn" @click="addLine">+ Add item</button>
                 <button class="mp-ir-foot-btn">Import from CSV</button>
-                <button class="mp-ir-foot-btn">Copy from previous request</button>
-                <div class="mp-ir-foot-total">
+                <button class="mp-ir-foot-btn" @click="showCopyFrom = true">Copy from previous request</button>
+                <div v-if="showItemValues" class="mp-ir-foot-total">
                     <span class="mp-ir-foot-lbl">Estimated total</span>
                     <span class="mono mp-ir-foot-val">{{ fmtMoney(formTotal) }}</span>
                 </div>
             </div>
         </div>
+
+        <CopyFromRequestModal
+            v-if="showCopyFrom"
+            :requests="requests"
+            :catalog="catalog"
+            :exclude-code="createdRequestCode"
+            @close="showCopyFrom = false"
+            @copy="onLinesCopied"
+        />
 
         <!-- Routing -->
         <div class="mp-card" ref="routingCard">
@@ -536,6 +615,7 @@ async function persist(shouldSubmit) {
     gap: 8px; align-items: start; padding: 8px 4px;
     border-bottom: 1px dashed #efece4;
 }
+.mp-ir-head.mp-ir-no-value, .mp-ir.mp-ir-no-value { grid-template-columns: 110px 130px 140px 1.4fr 80px 1fr 32px; }
 .mp-ir select, .mp-ir > input { border: 1px solid #e8e4db; border-radius: 5px; padding: 6px 8px; font-size: 12.5px; width: 100%; background: #fff; }
 .mp-ir input[type="number"] { text-align: right; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
 .mp-ir-item { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
