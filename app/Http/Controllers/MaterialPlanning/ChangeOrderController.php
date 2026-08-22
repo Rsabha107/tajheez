@@ -30,7 +30,9 @@ class ChangeOrderController extends Controller
             'stage' => 'Not submitted',
         ]);
 
-        return response()->json(['id' => $changeOrder->code], 201);
+        // `id` is the human code used for display; `dbId` is the real PK the
+        // frontend needs for the follow-up change-order-lines.store calls.
+        return response()->json(['id' => $changeOrder->code, 'dbId' => $changeOrder->id], 201);
     }
 
     public function update(Request $request, ChangeOrder $changeOrder)

@@ -29,3 +29,8 @@ Homestead.json
 auth.json
 /node_modules/
 node_modules/
+/docs
+CHANGELOG.md
+.gitignore
+README.md
+CLAUDE.md

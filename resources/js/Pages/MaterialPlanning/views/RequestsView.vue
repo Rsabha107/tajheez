@@ -30,7 +30,7 @@ const reqSearch = ref('');
 const selectedIds = ref(new Set());
 watch(() => props.requests, () => {
     selectedIds.value = new Set();
-    expandedIds.value = new Set();
+    expandedId.value = null;
     expandedData.value = {};
     expandedError.value = {};
 });
@@ -46,21 +46,15 @@ function toggleSelectAll() {
         : new Set(filteredRequests.value.map(r => r.id));
 }
 
-// ── Expand row to show line items ────────────────────────────────────────────
-const expandedIds = ref(new Set());
+// ── Expand row to show line items (one at a time) ────────────────────────────
+const expandedId = ref(null);
 const expandedData = ref({});   // code -> detail response ({ lines: [...] })
 const expandedLoading = ref(new Set());
 const expandedError = ref({});  // code -> error message
 
 async function toggleExpand(r) {
-    const next = new Set(expandedIds.value);
-    if (next.has(r.id)) {
-        next.delete(r.id);
-        expandedIds.value = next;
-        return;
-    }
-    next.add(r.id);
-    expandedIds.value = next;
+    expandedId.value = expandedId.value === r.id ? null : r.id;
+    if (expandedId.value === null) return;
 
     if (expandedData.value[r.id] || expandedLoading.value.has(r.id)) return;
 
@@ -298,12 +292,12 @@ function avatarColor(initials) {
                     <template v-for="r in filteredRequests" :key="r.id">
                     <tr
                         class="mp-dt-row"
-                        :class="{ 'mp-dt-row-expanded': expandedIds.has(r.id) }"
+                        :class="{ 'mp-dt-row-expanded': expandedId === r.id }"
                         @click="toggleExpand(r)"
                     >
                         <td @click.stop><input type="checkbox" :checked="selectedIds.has(r.id)" @change="toggleRow(r.id)"/></td>
                         <td class="mono mp-dt-id">
-                            <i class="bx mp-dt-chevron" :class="expandedIds.has(r.id) ? 'bx-chevron-down' : 'bx-chevron-right'"></i>
+                            <i class="bx mp-dt-chevron" :class="expandedId === r.id ? 'bx-chevron-down' : 'bx-chevron-right'"></i>
                             {{ r.id }}
                             <i v-if="r.hasServiceOption" class="bx bxs-truck mp-dt-svc-mark" title="One or more items has a service assigned"></i>
                         </td>
@@ -341,7 +335,7 @@ function avatarColor(initials) {
                             ><i class="bx bx-link-external"></i></button>
                         </td>
                     </tr>
-                    <tr v-if="expandedIds.has(r.id)" class="mp-dt-expand-row">
+                    <tr v-if="expandedId === r.id" class="mp-dt-expand-row">
                         <td colspan="10">
                             <div v-if="expandedLoading.has(r.id)" class="mp-dt-expand-status">Loading items…</div>
                             <div v-else-if="expandedError[r.id]" class="mp-dt-expand-status mp-dt-expand-error">{{ expandedError[r.id] }}</div>
@@ -482,11 +476,12 @@ function avatarColor(initials) {
 
 .mp-dt-chevron { font-size: 15px; vertical-align: -2px; margin-right: 2px; color: #a39d96; }
 .mp-dt-svc-mark { font-size: 13px; vertical-align: -1px; margin-left: 5px; color: #0f766e; }
-.mp-dt-row-expanded td { background: #fbfaf6; }
-.mp-dt-expand-row td { padding: 0; border-bottom: 1px solid #f3f0ea; }
+.mp-dt-row-expanded td { background: #fbfaf6; font-weight: 600; }
+.mp-dt-row-expanded td:first-child { box-shadow: inset 3px 0 0 #0f766e; }
+.mp-dt-expand-row td { padding: 0 40px; border-bottom: 1px solid #f3f0ea; }
 .mp-dt-expand-status { padding: 16px 24px; font-size: 12.5px; color: #76706a; }
 .mp-dt-expand-error { color: #991b1b; }
-.mp-dt-expand-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fbfaf6; }
+.mp-dt-expand-table { width: 100%; border-collapse: collapse; font-size: 11.5px; background: #fbfaf6; }
 .mp-dt-expand-table th {
     background: #f3f0e8; color: #76706a; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
     padding: 7px 24px; text-align: left; white-space: nowrap;
@@ -494,7 +489,6 @@ function avatarColor(initials) {
 .mp-dt-expand-table th.ta-c { text-align: center; }
 .mp-dt-expand-table td { padding: 8px 24px; border-top: 1px solid #efece4; color: #1a1614; }
 .mp-dt-expand-table td.ta-c { text-align: center; }
-.mp-dt-expand-table td:first-child, .mp-dt-expand-table th:first-child { padding-left: 24px; }
 
 .mp-dtag {
     display: inline-flex; align-items: center; gap: 4px;

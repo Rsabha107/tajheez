@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import axios from 'axios';
 import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
 import AssignServiceOptionModal from '../components/AssignServiceOptionModal.vue';
+import RaiseChangeOrderModal from '../components/RaiseChangeOrderModal.vue';
 
 const props = defineProps({
     requests:      Array,
@@ -124,6 +125,14 @@ function onOptionCreated(option) {
     if (option.dbId) assignOption(option.dbId);
 }
 
+// ── Raise change order ────────────────────────────────────────────────────
+const showChangeOrderModal = ref(false);
+function closeChangeOrderModal() { showChangeOrderModal.value = false; }
+function onChangeOrderRaised() {
+    detailTab.value = 'change-order';
+    emit('refresh-detail');
+}
+
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
 function initialsOf(name) {
     if (!name) return '—';
@@ -162,7 +171,7 @@ function avatarColor(name) {
                     @click="emit('go-to', 'new', { editCode: detailRequest.code })"
                 ><i class="bx bx-pencil"></i> Edit</button>
                 <button class="mp-btn">Duplicate</button>
-                <button class="mp-btn">Open change order</button>
+                <button class="mp-btn" :disabled="!detailLines.length" @click="showChangeOrderModal = true">Open change order</button>
                 <button class="mp-btn mp-btn-primary">✓ Approve</button>
             </div>
         </div>
@@ -295,6 +304,19 @@ function avatarColor(name) {
                 @add="onOptionCreated"
             />
 
+            <RaiseChangeOrderModal
+                v-if="showChangeOrderModal"
+                :request="detailRequest"
+                :lines="detailLines"
+                :domains="domains"
+                :service-options="serviceOptions"
+                :suppliers="suppliers"
+                :people="people"
+                :show-item-values="showItemValues"
+                @close="closeChangeOrderModal"
+                @raised="onChangeOrderRaised"
+            />
+
             <!-- Change order tab -->
             <div v-if="detailTab === 'change-order'" class="mp-card mp-card-flush">
                 <div v-if="!activeChangeOrder" class="mp-empty">No change orders have been raised for this request.</div>
@@ -371,6 +393,8 @@ function avatarColor(name) {
     transition: background .15s;
 }
 .mp-btn:hover { background: #f6f5f1; }
+.mp-btn:disabled { opacity: .5; cursor: not-allowed; }
+.mp-btn:disabled:hover { background: #fff; }
 .mp-btn-primary { background: #0f766e; border-color: #0f766e; color: #fff; }
 .mp-btn-primary:hover { background: #0d9488; }
 .mp-btn-sm { padding: 4px 10px; font-size: 12px; }
