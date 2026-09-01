@@ -25,9 +25,18 @@ const currentPerson = computed(() => {
 
 function domainOf(code) { return props.domains.find(d => d.code === code); }
 function supplierOf(code) { return props.suppliers.find(s => s.code === code); }
-function optionsFor(sku) { return props.serviceOptions.filter(o => o.sku === sku); }
+// Bundles are no longer scoped to a SKU — any active bundle can be assigned to any line.
+function activeOptions() { return props.serviceOptions.filter(o => o.classificationName !== 'Suspended'); }
 function optionOf(dbId) { return props.serviceOptions.find(o => o.dbId === dbId); }
 function fmtMoney(n) { return '$' + Number(n || 0).toLocaleString('en-US'); }
+
+// Each service in a bundle can have its own supplier, so a bundle can span several.
+function supplierNamesOf(o) {
+    return [...new Set((o.services || []).map(s => supplierOf(s.supplier)?.name ?? s.supplier))].join(', ');
+}
+function hasSuspendedSupplier(o) {
+    return (o.services || []).some(s => supplierOf(s.supplier)?.classificationName === 'Suspended');
+}
 
 const avatarColors = ['#7c2d12', '#0f766e', '#b45309', '#1d4ed8', '#6b21a8', '#155e75', '#854d0e'];
 function initialsOf(name) {
@@ -195,8 +204,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                     <div class="sel sel-sm">
                                         <select :value="rowOf(i).opt" :disabled="rowOf(i).drop" @change="setRow(i, { opt: $event.target.value ? +$event.target.value : '' })">
                                             <option value="">Not set — catalog rate</option>
-                                            <option v-for="o in optionsFor(l.sku)" :key="o.dbId" :value="o.dbId" :disabled="supplierOf(o.supplier)?.classificationName === 'Suspended'">
-                                                {{ o.name }} · {{ supplierOf(o.supplier)?.name }}{{ supplierOf(o.supplier)?.classificationName === 'Suspended' ? ' — suspended' : '' }}
+                                            <option v-for="o in activeOptions()" :key="o.dbId" :value="o.dbId" :disabled="hasSuspendedSupplier(o)">
+                                                {{ o.name }} · {{ supplierNamesOf(o) }}{{ hasSuspendedSupplier(o) ? ' — supplier suspended' : '' }}
                                             </option>
                                         </select>
                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>

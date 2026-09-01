@@ -30,7 +30,6 @@ class CatalogItemController extends Controller
         unset($data['domain_code']);
         $data['stock'] = $data['stock'] ?? 0;
         $item = CatalogItem::create($data);
-        $item->ensureOwnPoolOption();
 
         return response()->json($this->present($item), 201);
     }
@@ -68,6 +67,10 @@ class CatalogItemController extends Controller
     {
         return [
             'sku' => $item->sku,
+            // Real numeric PK — `sku` is the human-readable identifier used
+            // everywhere else in the UI, but PUT/DELETE against a specific
+            // item needs the actual FK value (mp_catalog_items.id).
+            'dbId' => $item->id,
             'domain' => $item->domain_code,
             'group' => $item->group,
             'sub' => $item->sub,

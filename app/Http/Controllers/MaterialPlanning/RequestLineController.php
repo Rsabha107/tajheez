@@ -57,6 +57,34 @@ class RequestLineController extends Controller
         return response()->json(['message' => 'Line removed successfully.']);
     }
 
+    /** Assigns one service option bundle to many lines at once, from the Items view's bulk-select. */
+    public function bulkAssignServiceOption(Request $request)
+    {
+        $data = $request->validate([
+            'line_ids' => ['required', 'array', 'min:1'],
+            'line_ids.*' => ['integer', 'exists:mp_request_lines,id'],
+            'service_option_id' => ['required', 'exists:mp_service_options,id'],
+        ]);
+
+        $lines = RequestLine::whereIn('id', $data['line_ids'])->get();
+
+        foreach ($lines as $line) {
+            Gate::authorize('update', $line);
+            $line->update(['service_option_id' => $data['service_option_id']]);
+        }
+
+        $updated = RequestLine::whereIn('id', $data['line_ids'])->with('serviceOption.services.supplier')->get();
+
+        return response()->json([
+            'lines' => $updated->map(fn (RequestLine $l) => [
+                'id' => $l->id,
+                'serviceOptionId' => $l->service_option_id,
+                'serviceOptionName' => $l->serviceOption?->name,
+                'supplierName' => $l->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
+            ])->values()->all(),
+        ]);
+    }
+
     private function present(RequestLine $line): array
     {
         return [

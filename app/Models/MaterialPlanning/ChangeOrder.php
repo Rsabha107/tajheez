@@ -84,7 +84,8 @@ class ChangeOrder extends Model
         $more = $this->lines->count() > 1 ? ' +' . ($this->lines->count() - 1) . ' more' : '';
 
         if ($this->reason === 'Service option change') {
-            $supplierName = $head->serviceOptionAfter?->supplier?->name ?? '';
+            // A bundle's services can each have their own supplier, so this is a summary list.
+            $supplierName = $head->serviceOptionAfter?->services->pluck('supplier.name')->unique()->filter()->implode(', ') ?? '';
             return "Switch {$short} to {$supplierName}{$more} — {$this->context}";
         }
 

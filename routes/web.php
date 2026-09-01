@@ -23,6 +23,7 @@ use App\Http\Controllers\MaterialPlanning\ItemSubgroupController;
 use App\Http\Controllers\MaterialPlanning\MaterialRequestController;
 use App\Http\Controllers\MaterialPlanning\RequestLineController;
 use App\Http\Controllers\MaterialPlanning\ServiceOptionController;
+use App\Http\Controllers\MaterialPlanning\ServiceOptionItemController;
 use App\Http\Controllers\MaterialPlanning\SpaceController;
 use App\Http\Controllers\MaterialPlanning\SupplierController;
 use App\Http\Controllers\UserController;
@@ -171,6 +172,12 @@ Route::middleware('auth')->group(function () {
         Route::delete('/api/mp/service-options/{serviceOption}', 'destroy')->name('mp.service-options.destroy');
     });
 
+    Route::controller(ServiceOptionItemController::class)->group(function () {
+        Route::post('/api/mp/service-option-items', 'store')->name('mp.service-option-items.store');
+        Route::put('/api/mp/service-option-items/{serviceOptionItem}', 'update')->name('mp.service-option-items.update');
+        Route::delete('/api/mp/service-option-items/{serviceOptionItem}', 'destroy')->name('mp.service-option-items.destroy');
+    });
+
     // App Setups — admin-only, both hidden in Index.vue's sidebar and gated here.
     Route::middleware('role:admin')->group(function () {
         Route::controller(SupplierController::class)->group(function () {
@@ -229,6 +236,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/api/mp/requests/{materialRequest}/lines', 'store')->name('mp.request-lines.store');
         Route::put('/api/mp/request-lines/{requestLine}', 'update')->name('mp.request-lines.update');
         Route::delete('/api/mp/request-lines/{requestLine}', 'destroy')->name('mp.request-lines.destroy');
+        Route::put('/api/mp/request-lines', 'bulkAssignServiceOption')->name('mp.request-lines.bulk-assign');
     });
 
     Route::controller(ChangeOrderController::class)->group(function () {

@@ -14,7 +14,9 @@ use App\Models\MaterialPlanning\Domain;
 use App\Models\MaterialPlanning\ItemGroup;
 use App\Models\MaterialPlanning\ItemSubgroup;
 use App\Models\MaterialPlanning\MaterialRequest;
+use App\Models\MaterialPlanning\RequestLine;
 use App\Models\MaterialPlanning\ServiceOption;
+use App\Models\MaterialPlanning\ServiceOptionItem;
 use App\Models\MaterialPlanning\Space;
 use App\Models\MaterialPlanning\Supplier;
 use App\Models\User;
@@ -70,11 +72,15 @@ class MaterialPlanningController extends Controller
         $entityStatuses = GlobalStatus::where('is_active', 1)->get();
         $classifications = Classification::where('is_active', 1)->get();
 
-        $suppliers = Supplier::with(['classification', 'status'])->withAvg('serviceOptions', 'lead_days')->orderBy('name')->get();
+        $suppliers = Supplier::with(['classification', 'status'])->withAvg('serviceOptionItems', 'lead_days')->orderBy('name')->get();
         $catalogItems = CatalogItem::orderBy('sku')->get();
-        $serviceOptions = ServiceOption::with(['classification', 'status'])->orderBy('id')->get();
+        $serviceOptions = ServiceOption::with(['classification', 'status', 'itemGroup', 'itemSubgroup', 'services.supplier'])->orderBy('id')->get();
+        $serviceOptionItems = ServiceOptionItem::with(['supplier', 'itemGroup', 'itemSubgroup'])->withCount('bundles')->orderBy('name')->get();
 
-        $requests = MaterialRequest::with(['venue', 'owner', 'functionalArea', 'lines.catalogItem'])
+        $requests = MaterialRequest::with([
+            'venue', 'owner', 'functionalArea', 'space', 'area',
+            'lines.catalogItem', 'lines.serviceOption.services.supplier',
+        ])
             ->when(! $isAdmin, fn ($q) => $q->whereIn('functional_area_id', $userFunctionalAreaIds))
             ->orderByDesc('id')->get();
 
@@ -83,7 +89,7 @@ class MaterialPlanningController extends Controller
         $functionalAreas = FunctionalArea::query()
             ->when(! $isAdmin, fn ($q) => $q->whereIn('id', $userFunctionalAreaIds))
             ->orderBy('title')->get();
-        $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.supplier'])
+        $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.services.supplier'])
             ->orderByDesc('id')->get();
 
         // "People" is derived from real users: anyone referenced as an owner/approver,
@@ -225,6 +231,10 @@ class MaterialPlanningController extends Controller
 
             'requests' => $requests->map(fn (MaterialRequest $r) => [
                 'id' => $r->code,
+                // Real numeric PK — `id` above is the human-readable code used
+                // everywhere else in the UI, but PUT/DELETE against a specific
+                // request needs the actual FK value (mp_requests.id).
+                'dbId' => $r->id,
                 'eventId' => $r->event_id,
                 'title' => $r->title,
                 'venue' => $r->venue?->short_name,
@@ -239,11 +249,50 @@ class MaterialPlanningController extends Controller
                 'updated' => $r->updated,
                 'owner' => $r->owner?->initials,
                 'priority' => $r->priority,
+                'space' => $r->space_id,
+                'spaceLabel' => $r->space?->name,
+                'area' => $r->area_id,
+                'areaLabel' => $r->area?->label,
                 'hasServiceOption' => $r->lines->contains(fn ($l) => $l->service_option_id !== null),
             ])->values()->all(),
 
+            // Flat cross-request line-item list, denormalized with the parent request's
+            // venue/functional area/owner/space/area/move dates — powers the Items view's
+            // filters and bulk service-option assignment ("ship everything, filter client-side").
+            'requestLines' => $requests->flatMap(fn (MaterialRequest $r) => $r->lines->map(fn (RequestLine $l) => [
+                'id' => $l->id,
+                'requestId' => $r->code,
+                'requestTitle' => $r->title,
+                'eventId' => $r->event_id,
+                'status' => $r->status,
+                'sku' => $l->sku,
+                'name' => $l->catalogItem?->name,
+                'domain' => $l->domain,
+                'group' => $l->catalogItem?->group,
+                'sub' => $l->catalogItem?->sub,
+                'venue' => $r->venue?->short_name,
+                'functionalArea' => $r->functionalArea?->fa_code,
+                'ownerId' => $r->owner_user_id,
+                'ownerInitials' => $r->owner?->initials,
+                'space' => $r->space_id,
+                'spaceLabel' => $r->space?->name,
+                'area' => $r->area_id,
+                'areaLabel' => $r->area?->label,
+                'moveIn' => $r->move_in?->format('Y-m-d'),
+                'moveOut' => $r->move_out?->format('Y-m-d'),
+                'qty' => $l->qty,
+                'unit' => $l->unit,
+                'rate' => (float) $l->rate_snapshot,
+                'value' => round($l->qty * $l->rate_snapshot, 2),
+                'comment' => $l->comment,
+                'serviceOptionId' => $l->service_option_id,
+                'serviceOptionName' => $l->serviceOption?->name,
+                'supplierName' => $l->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
+            ]))->values()->all(),
+
             'catalog' => $catalogItems->map(fn (CatalogItem $c) => [
                 'sku' => $c->sku,
+                'dbId' => $c->id,
                 'domain' => $c->domain_code,
                 'group' => $c->group,
                 'sub' => $c->sub,
@@ -268,8 +317,8 @@ class MaterialPlanningController extends Controller
                 'msa' => $s->msa_reference ?? '—',
                 'contactName' => $s->contact_name,
                 'contactPhone' => $s->contact_phone,
-                'avgLeadDays' => $s->service_options_avg_lead_days !== null
-                    ? (int) round($s->service_options_avg_lead_days)
+                'avgLeadDays' => $s->service_option_items_avg_lead_days !== null
+                    ? (int) round($s->service_option_items_avg_lead_days)
                     : null,
             ])->values()->all(),
 
@@ -279,15 +328,11 @@ class MaterialPlanningController extends Controller
                 // everywhere else in the UI, but assigning a line to an option
                 // needs the actual FK value (mp_request_lines.service_option_id).
                 'dbId' => $o->id,
-                'sku' => $o->sku,
                 'name' => $o->name,
-                'supplier' => $o->supplier_code,
-                'cost' => (float) $o->cost,
-                'lead' => $o->lead_days,
-                'sla' => $o->sla,
-                'capacity' => $o->capacity,
-                'contract' => $o->contract_reference ?? '—',
-                'spec' => $o->spec ?? '—',
+                'cost' => (float) $o->services->sum('cost'),
+                'lead' => (int) $o->services->max('lead_days'),
+                // Distinct suppliers behind this bundle's services, for a quick summary display.
+                'suppliers' => $o->services->pluck('supplier_code')->unique()->values()->all(),
                 'classificationId' => $o->classification_id,
                 'classificationName' => $o->classification?->name,
                 'classificationColor' => $o->classification?->color,
@@ -295,6 +340,40 @@ class MaterialPlanningController extends Controller
                 'statusName' => $o->status?->name,
                 'statusColor' => $o->status?->color,
                 'isDefault' => $o->is_default,
+                'itemGroupId' => $o->item_group_id,
+                'itemGroupLabel' => $o->itemGroup?->label,
+                'itemSubgroupId' => $o->item_subgroup_id,
+                'itemSubgroupLabel' => $o->itemSubgroup?->name,
+                'services' => $o->services->map(fn ($s) => [
+                    'id' => $s->id,
+                    'name' => $s->name,
+                    'supplier' => $s->supplier_code,
+                    'cost' => (float) $s->cost,
+                    'lead' => $s->lead_days,
+                    'sla' => $s->sla,
+                    'capacity' => $s->capacity,
+                    'contract' => $s->contract_reference ?? '—',
+                    'spec' => $s->spec ?? '—',
+                ])->values()->all(),
+            ])->values()->all(),
+
+            'serviceOptionItems' => $serviceOptionItems->map(fn (ServiceOptionItem $i) => [
+                'id' => $i->code,
+                'dbId' => $i->id,
+                'name' => $i->name,
+                'supplierCode' => $i->supplier_code,
+                'supplierName' => $i->supplier?->name,
+                'cost' => (float) $i->cost,
+                'lead' => $i->lead_days,
+                'sla' => $i->sla,
+                'capacity' => $i->capacity,
+                'contract' => $i->contract_reference ?? '—',
+                'spec' => $i->spec ?? '—',
+                'itemGroupId' => $i->item_group_id,
+                'itemGroupLabel' => $i->itemGroup?->label,
+                'itemSubgroupId' => $i->item_subgroup_id,
+                'itemSubgroupLabel' => $i->itemSubgroup?->name,
+                'usageCount' => $i->bundles_count,
             ])->values()->all(),
 
             'changeOrders' => $changeOrders->map(fn (ChangeOrder $co) => [

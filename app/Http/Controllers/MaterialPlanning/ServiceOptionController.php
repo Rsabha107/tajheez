@@ -3,56 +3,43 @@
 namespace App\Http\Controllers\MaterialPlanning;
 
 use App\Http\Controllers\Controller;
-use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ServiceOption;
-use App\Models\MaterialPlanning\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
 class ServiceOptionController extends Controller
 {
+    private const ITEM_RULES = [
+        'service_option_item_ids' => ['required', 'array', 'min:1'],
+        'service_option_item_ids.*' => ['integer', 'exists:mp_service_option_items,id'],
+    ];
+
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'sku' => ['required', 'exists:mp_catalog_items,sku'],
+        Gate::authorize('create', ServiceOption::class);
+
+        $data = $request->validate(array_merge([
             'name' => ['required', 'string', 'max:180'],
-            'supplier_code' => ['required', 'exists:mp_suppliers,code'],
-            'cost' => ['required', 'numeric', 'min:0'],
-            'lead_days' => ['nullable', 'integer', 'min:0'],
-            'sla' => ['nullable', 'string', 'max:120'],
-            'capacity' => ['nullable', 'integer', 'min:0'],
-            'contract_reference' => ['nullable', 'string', 'max:60'],
-            'spec' => ['nullable', 'string'],
             'classification_id' => ['nullable', 'exists:classifications,id'],
             'status_id' => ['nullable', 'exists:global_statuses,id'],
             'is_default' => ['nullable', 'boolean'],
-        ]);
-
-        $item = CatalogItem::where('sku', $data['sku'])->firstOrFail();
-        Gate::authorize('createForItem', [ServiceOption::class, $item]);
-
-        $supplier = Supplier::where('code', $data['supplier_code'])->firstOrFail();
-
-        $skuTail = substr($data['sku'], strrpos($data['sku'], '-') + 1);
-        $supplierTail = substr($data['supplier_code'], -3);
+            'item_group_id' => ['nullable', 'exists:mp_item_groups,id'],
+            'item_subgroup_id' => ['nullable', 'exists:mp_item_subgroups,id'],
+        ], self::ITEM_RULES));
 
         $option = ServiceOption::create([
-            'code' => sprintf('SO-%s-%s-%d', $skuTail, $supplierTail, random_int(10, 99)),
-            'catalog_item_id' => $item->id,
-            'supplier_id' => $supplier->id,
+            'code' => $this->generateCode($data['name']),
             'name' => $data['name'],
-            'cost' => $data['cost'],
-            'lead_days' => $data['lead_days'] ?? 0,
-            'sla' => $data['sla'] ?? '',
-            'capacity' => $data['capacity'] ?? 0,
-            'contract_reference' => $data['contract_reference'] ?? null,
-            'spec' => $data['spec'] ?? null,
             'classification_id' => $data['classification_id'] ?? 2,
             'status_id' => $data['status_id'] ?? 1,
             'is_default' => $data['is_default'] ?? false,
+            'item_group_id' => $data['item_group_id'] ?? null,
+            'item_subgroup_id' => $data['item_subgroup_id'] ?? null,
         ]);
 
-        return response()->json($this->present($option), 201);
+        $this->syncItems($option, $data['service_option_item_ids']);
+
+        return response()->json($this->present($option->load(['services.supplier', 'itemGroup', 'itemSubgroup'])), 201);
     }
 
     public function update(Request $request, ServiceOption $serviceOption)
@@ -61,26 +48,25 @@ class ServiceOptionController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:180'],
-            'supplier_code' => ['sometimes', 'exists:mp_suppliers,code'],
-            'cost' => ['sometimes', 'numeric', 'min:0'],
-            'lead_days' => ['sometimes', 'integer', 'min:0'],
-            'sla' => ['sometimes', 'string', 'max:120'],
-            'capacity' => ['sometimes', 'integer', 'min:0'],
-            'contract_reference' => ['nullable', 'string', 'max:60'],
-            'spec' => ['nullable', 'string'],
             'classification_id' => ['sometimes', 'exists:classifications,id'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
             'is_default' => ['sometimes', 'boolean'],
+            'item_group_id' => ['nullable', 'exists:mp_item_groups,id'],
+            'item_subgroup_id' => ['nullable', 'exists:mp_item_subgroups,id'],
+            'service_option_item_ids' => ['sometimes', 'array', 'min:1'],
+            'service_option_item_ids.*' => ['integer', 'exists:mp_service_option_items,id'],
         ]);
 
-        if (isset($data['supplier_code'])) {
-            $data['supplier_id'] = Supplier::where('code', $data['supplier_code'])->value('id');
-            unset($data['supplier_code']);
-        }
+        $itemIds = $data['service_option_item_ids'] ?? null;
+        unset($data['service_option_item_ids']);
 
         $serviceOption->update($data);
 
-        return response()->json($this->present($serviceOption));
+        if ($itemIds !== null) {
+            $this->syncItems($serviceOption, $itemIds);
+        }
+
+        return response()->json($this->present($serviceOption->load(['services.supplier', 'itemGroup', 'itemSubgroup'])));
     }
 
     public function destroy(ServiceOption $serviceOption)
@@ -92,21 +78,44 @@ class ServiceOptionController extends Controller
         return response()->json(['message' => 'Service option deleted successfully.']);
     }
 
+    /** Replaces a bundle's whole item list (in order) — the modal always submits the full set. */
+    private function syncItems(ServiceOption $option, array $itemIds): void
+    {
+        $pivot = [];
+        foreach (array_values($itemIds) as $i => $id) {
+            $pivot[$id] = ['sort_order' => $i];
+        }
+
+        $option->services()->sync($pivot);
+    }
+
+    private function generateCode(string $name): string
+    {
+        $nameTail = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 6)) ?: 'SVC';
+
+        for ($attempt = 0; $attempt < 10; $attempt++) {
+            $code = sprintf('SO-%s-%d', $nameTail, random_int(100, 999));
+            if (! ServiceOption::where('code', $code)->exists()) {
+                return $code;
+            }
+        }
+
+        return sprintf('SO-%s-%d', $nameTail, random_int(1000, 9999));
+    }
+
     /** Shape matches the mock service-option row exactly (id = code), for drop-in frontend compatibility. */
     private function present(ServiceOption $option): array
     {
+        $services = $option->services;
+
         return [
             'id' => $option->code,
             'dbId' => $option->id,
-            'sku' => $option->sku,
             'name' => $option->name,
-            'supplier' => $option->supplier_code,
-            'cost' => (float) $option->cost,
-            'lead' => $option->lead_days,
-            'sla' => $option->sla,
-            'capacity' => $option->capacity,
-            'contract' => $option->contract_reference ?? '—',
-            'spec' => $option->spec ?? '—',
+            'cost' => (float) $services->sum('cost'),
+            'lead' => (int) $services->max('lead_days'),
+            // Distinct suppliers behind this bundle's services, for a quick summary display.
+            'suppliers' => $services->pluck('supplier_code')->unique()->values()->all(),
             'classificationId' => $option->classification_id,
             'classificationName' => $option->classification?->name,
             'classificationColor' => $option->classification?->color,
@@ -114,6 +123,21 @@ class ServiceOptionController extends Controller
             'statusName' => $option->status?->name,
             'statusColor' => $option->status?->color,
             'isDefault' => $option->is_default,
+            'itemGroupId' => $option->item_group_id,
+            'itemGroupLabel' => $option->itemGroup?->label,
+            'itemSubgroupId' => $option->item_subgroup_id,
+            'itemSubgroupLabel' => $option->itemSubgroup?->name,
+            'services' => $services->map(fn ($s) => [
+                'id' => $s->id,
+                'name' => $s->name,
+                'supplier' => $s->supplier_code,
+                'cost' => (float) $s->cost,
+                'lead' => $s->lead_days,
+                'sla' => $s->sla,
+                'capacity' => $s->capacity,
+                'contract' => $s->contract_reference ?? '—',
+                'spec' => $s->spec ?? '—',
+            ])->values()->all(),
         ];
     }
 }

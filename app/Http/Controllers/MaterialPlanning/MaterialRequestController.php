@@ -25,7 +25,7 @@ class MaterialRequestController extends Controller
     {
         $materialRequest = MaterialRequest::with([
             'venue', 'owner', 'functionalArea',
-            'lines.catalogItem', 'lines.serviceOption.supplier',
+            'lines.catalogItem', 'lines.serviceOption.services.supplier',
             'approvalSteps.approver',
             'activity.actor',
             'changeOrders.raisedBy', 'changeOrders.lines.catalogItem',
@@ -45,6 +45,8 @@ class MaterialRequestController extends Controller
             'event_id' => ['required', 'exists:events,id'],
             'venue_id' => ['required', 'exists:venues,id'],
             'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
+            'area_id' => ['nullable', 'exists:mp_areas,id'],
+            'space_id' => ['nullable', 'exists:mp_spaces,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['nullable', 'string', 'max:120'],
@@ -85,6 +87,8 @@ class MaterialRequestController extends Controller
             'event_id' => ['sometimes', 'exists:events,id'],
             'venue_id' => ['sometimes', 'exists:venues,id'],
             'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
+            'area_id' => ['nullable', 'exists:mp_areas,id'],
+            'space_id' => ['nullable', 'exists:mp_spaces,id'],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['sometimes', 'string', 'max:120'],
@@ -188,6 +192,8 @@ class MaterialRequestController extends Controller
             'venueId' => $materialRequest->venue_id,
             'functionalAreaId' => $materialRequest->functional_area_id,
             'functionalArea' => $materialRequest->functionalArea?->title,
+            'areaId' => $materialRequest->area_id,
+            'spaceId' => $materialRequest->space_id,
             'site' => $materialRequest->site_name,
             'siteType' => $materialRequest->site_type,
             'siteCode' => $materialRequest->site_code,
@@ -213,6 +219,7 @@ class MaterialRequestController extends Controller
                 'id' => $line->id,
                 'sku' => $line->sku,
                 'name' => $line->catalogItem?->name,
+                'sub' => $line->catalogItem?->sub,
                 'unit' => $line->unit,
                 'domain' => $line->domain,
                 'qty' => (int) $line->qty,
@@ -221,7 +228,8 @@ class MaterialRequestController extends Controller
                 'comment' => $line->comment,
                 'serviceOptionId' => $line->service_option_id,
                 'serviceOptionName' => $line->serviceOption?->name,
-                'supplierName' => $line->serviceOption?->supplier?->name,
+                // A bundle's services can each have their own supplier, so this is a summary list.
+                'supplierName' => $line->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
             ])->values()->all(),
             'approvalSteps' => $materialRequest->approvalSteps->map(fn (RequestApprovalStep $step) => [
                 'id' => $step->id,

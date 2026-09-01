@@ -72,8 +72,8 @@ async function loadDraft(code) {
             siteType: data.siteType || '',
             siteCode: data.siteCode || '',
             siteName: data.site || '',
-            area: props.areas.find(a => a.label === data.lsCategory)?.id || '',
-            space: data.lsCode || '',
+            area: data.areaId || props.areas.find(a => a.label === data.lsCategory)?.id || '',
+            space: props.spaces.find(s => s.id === data.spaceId)?.code || data.lsCode || '',
             lsName: data.lsName || '',
             lsCode: data.lsCode || '',
             baseRoom: data.baseRoom || 'No',
@@ -223,12 +223,15 @@ async function persist(shouldSubmit) {
     error.value = null;
     try {
         const areaLabel = props.areas.find(a => a.id === form.value.area)?.label ?? null;
+        const spaceId = props.spaces.find(s => s.code === form.value.space)?.id ?? null;
 
         const payload = new FormData();
         payload.append('title', form.value.title.trim() || 'Untitled request');
         payload.append('event_id', props.event.id);
         payload.append('venue_id', form.value.venue);
         if (form.value.functionalArea) payload.append('functional_area_id', form.value.functionalArea);
+        if (form.value.area) payload.append('area_id', form.value.area);
+        if (spaceId) payload.append('space_id', spaceId);
         if (form.value.siteType) payload.append('site_type', form.value.siteType);
         if (form.value.siteCode) payload.append('site_code', form.value.siteCode);
         if (form.value.siteName) payload.append('site_name', form.value.siteName);

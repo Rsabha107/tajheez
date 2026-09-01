@@ -11,18 +11,15 @@ class ServiceOption extends Model
     protected $table = 'mp_service_options';
     protected $guarded = [];
     protected $casts = [
-        'cost' => 'decimal:2',
         'is_default' => 'boolean',
     ];
 
-    public function catalogItem()
+    public function services()
     {
-        return $this->belongsTo(CatalogItem::class, 'catalog_item_id');
-    }
-
-    public function supplier()
-    {
-        return $this->belongsTo(Supplier::class, 'supplier_id');
+        return $this->belongsToMany(ServiceOptionItem::class, 'mp_bundle_service_options', 'bundle_id', 'service_option_item_id')
+            ->withPivot('sort_order')
+            ->withTimestamps()
+            ->orderBy('mp_bundle_service_options.sort_order');
     }
 
     public function classification()
@@ -35,18 +32,13 @@ class ServiceOption extends Model
         return $this->belongsTo(GlobalStatus::class, 'status_id');
     }
 
-    public function getSkuAttribute()
+    public function itemGroup()
     {
-        return $this->catalogItem?->sku;
+        return $this->belongsTo(ItemGroup::class, 'item_group_id');
     }
 
-    public function getSupplierCodeAttribute()
+    public function itemSubgroup()
     {
-        return $this->supplier?->code;
-    }
-
-    public function getDomainAttribute()
-    {
-        return $this->catalogItem?->domain_code;
+        return $this->belongsTo(ItemSubgroup::class, 'item_subgroup_id');
     }
 }

@@ -54,6 +54,16 @@ class MaterialRequest extends Model
         return $this->belongsTo(FunctionalArea::class, 'functional_area_id');
     }
 
+    public function space()
+    {
+        return $this->belongsTo(Space::class, 'space_id');
+    }
+
+    public function area()
+    {
+        return $this->belongsTo(Area::class, 'area_id');
+    }
+
     public function lines()
     {
         return $this->hasMany(RequestLine::class, 'request_id');

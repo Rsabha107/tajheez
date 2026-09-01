@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import RefreshButton from '../components/RefreshButton.vue';
+import FilterPanel from '../components/FilterPanel.vue';
 
 const props = defineProps({
     requests:    Array,
@@ -12,9 +13,12 @@ const props = defineProps({
     approvalOnly: { type: Boolean, default: false },
     people:      Array,
     functionalAreas: { type: Array, default: () => [] },
+    areas:       { type: Array, default: () => [] },
+    spaces:      { type: Array, default: () => [] },
     refreshing:  { type: Boolean, default: false },
     showItemValues: { type: Boolean, default: false },
     event:       { type: Object, default: null },
+    permissions: { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
 });
 
 const emit = defineEmits(['open-request', 'go-to', 'requests-deleted', 'refresh']);
@@ -24,6 +28,8 @@ const reqFilter = ref('all');
 const reqDomain = ref('all');
 const reqVenue  = ref('all');
 const reqFA     = ref('all');
+const reqArea   = ref('all');
+const reqSpace  = ref('all');
 const reqSearch = ref('');
 
 // ── Selection & bulk delete ──────────────────────────────────────────────────
@@ -76,27 +82,42 @@ async function toggleExpand(r) {
 const showDeleteConfirm = ref(false);
 const deleting = ref(false);
 const deleteError = ref(null);
+// Set when deleting a single row from its own action button — bulk delete
+// (via the selection checkboxes) leaves this null and uses `selectedIds` instead.
+const deleteTarget = ref(null);
 
 function confirmDeleteSelected() {
+    deleteTarget.value = null;
+    deleteError.value = null;
+    showDeleteConfirm.value = true;
+}
+
+function confirmDeleteOne(r) {
+    deleteTarget.value = r;
     deleteError.value = null;
     showDeleteConfirm.value = true;
 }
 
 async function deleteSelected() {
-    const codes = [...selectedIds.value];
-    if (!codes.length) return;
+    const single = deleteTarget.value;
+    if (!single && !selectedIds.value.size) return;
 
     deleting.value = true;
     deleteError.value = null;
     try {
-        await axios.delete(route('mp.requests.bulk-destroy'), { data: { codes } });
-        selectedIds.value = new Set();
+        if (single) {
+            await axios.delete(route('mp.requests.destroy', single.dbId));
+        } else {
+            await axios.delete(route('mp.requests.bulk-destroy'), { data: { codes: [...selectedIds.value] } });
+            selectedIds.value = new Set();
+        }
         showDeleteConfirm.value = false;
+        deleteTarget.value = null;
         emit('requests-deleted');
     } catch (e) {
         deleteError.value = e.response?.status === 403
-            ? "You don't have permission to delete these requests."
-            : 'Could not delete the selected requests.';
+            ? "You don't have permission to delete this request."
+            : 'Could not delete the selected request(s).';
     } finally {
         deleting.value = false;
     }
@@ -125,6 +146,8 @@ const filteredRequests = computed(() => {
     if (reqDomain.value !== 'all') rows = rows.filter(r => r.domain === reqDomain.value);
     if (reqVenue.value  !== 'all') rows = rows.filter(r => r.venue  === reqVenue.value);
     if (reqFA.value     !== 'all') rows = rows.filter(r => r.functionalArea === reqFA.value);
+    if (reqArea.value   !== 'all') rows = rows.filter(r => r.area  === reqArea.value);
+    if (reqSpace.value  !== 'all') rows = rows.filter(r => r.space === reqSpace.value);
     if (reqSearch.value) {
         const q = reqSearch.value.toLowerCase();
         rows = rows.filter(r => r.title.toLowerCase().includes(q) || r.id.toLowerCase().includes(q));
@@ -154,6 +177,23 @@ const statusCounts = computed(() => {
 function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
+
+// ── Filter panel ──────────────────────────────────────────────────────────────
+// Status stays as its own always-visible chip row below (not folded in here) —
+// these are just the fields that moved into the collapsed panel.
+function clearFilters() {
+    reqDomain.value = 'all'; reqVenue.value = 'all'; reqFA.value = 'all';
+    reqArea.value = 'all'; reqSpace.value = 'all';
+}
+const activeFilterChips = computed(() => {
+    const chips = [];
+    if (reqDomain.value !== 'all') chips.push({ key: 'domain', label: `Domain: ${domainOf(reqDomain.value)?.label ?? reqDomain.value}`, remove: () => { reqDomain.value = 'all'; } });
+    if (reqVenue.value !== 'all') chips.push({ key: 'venue', label: `Venue: ${venueOf(reqVenue.value)?.name ?? reqVenue.value}`, remove: () => { reqVenue.value = 'all'; } });
+    if (reqFA.value !== 'all') chips.push({ key: 'fa', label: `Functional Area: ${reqFA.value}`, remove: () => { reqFA.value = 'all'; } });
+    if (reqArea.value !== 'all') chips.push({ key: 'area', label: `Area: ${props.areas.find(a => a.id === reqArea.value)?.label ?? reqArea.value}`, remove: () => { reqArea.value = 'all'; } });
+    if (reqSpace.value !== 'all') chips.push({ key: 'space', label: `Space: ${props.spaces.find(s => s.id === reqSpace.value)?.name ?? reqSpace.value}`, remove: () => { reqSpace.value = 'all'; } });
+    return chips;
+});
 
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
 function avatarColor(initials) {
@@ -191,48 +231,84 @@ function avatarColor(initials) {
             </div>
         </div>
 
-        <!-- Filter bar -->
-        <div class="mp-filterbar">
+        <!-- Toolbar -->
+        <div class="mp-toolbar">
             <div class="mp-fb-search">
                 <i class="bx bx-search"></i>
                 <input v-model="reqSearch" placeholder="Find request by id or title…"/>
             </div>
-            <div class="mp-fb-sel">
-                <label>Domain</label>
-                <select v-model="reqDomain">
-                    <option value="all">All</option>
-                    <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
-                </select>
-            </div>
-            <div class="mp-fb-sel">
-                <label>Venue</label>
-                <select v-model="reqVenue">
-                    <option value="all">All venues</option>
-                    <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
-                </select>
-            </div>
-            <div class="mp-fb-sel">
-                <label>Functional Area</label>
-                <select v-model="reqFA">
-                    <option value="all">All</option>
-                    <option v-for="fa in functionalAreas" :key="fa.id" :value="fa.code">{{ fa.code }}</option>
-                </select>
-            </div>
-            <div class="mp-fb-sel">
-                <label>Owner</label>
-                <select>
-                    <option>Anyone</option>
-                    <option v-for="p in people" :key="p.initials">{{ p.name }}</option>
-                </select>
-            </div>
-            <div class="mp-fb-sel">
-                <label>Updated</label>
-                <select>
-                    <option>Any time</option>
-                    <option>Last 24h</option>
-                    <option>Last week</option>
-                </select>
-            </div>
+            <FilterPanel :active-filters="activeFilterChips" @clear-all="clearFilters">
+                <div class="fp-section">
+                    <div class="fp-section-title">Location</div>
+                    <div class="fp-field">
+                        <label>Domain</label>
+                        <select v-model="reqDomain">
+                            <option value="all">All</option>
+                            <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
+                        </select>
+                    </div>
+                    <div class="fp-field">
+                        <label>Venue</label>
+                        <select v-model="reqVenue">
+                            <option value="all">All venues</option>
+                            <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
+                        </select>
+                    </div>
+                    <div class="fp-field">
+                        <label>Area</label>
+                        <select v-model="reqArea">
+                            <option value="all">All</option>
+                            <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                        </select>
+                    </div>
+                    <div class="fp-field">
+                        <label>Space</label>
+                        <select v-model="reqSpace">
+                            <option value="all">All</option>
+                            <option v-for="s in spaces" :key="s.id" :value="s.id">{{ s.name }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="fp-section">
+                    <div class="fp-section-title">Classification</div>
+                    <div class="fp-field">
+                        <label>Functional Area</label>
+                        <select v-model="reqFA">
+                            <option value="all">All</option>
+                            <option v-for="fa in functionalAreas" :key="fa.id" :value="fa.code">{{ fa.code }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="fp-section">
+                    <div class="fp-section-title">People &amp; Activity</div>
+                    <div class="fp-field">
+                        <label>Owner</label>
+                        <select>
+                            <option>Anyone</option>
+                            <option v-for="p in people" :key="p.initials">{{ p.name }}</option>
+                        </select>
+                    </div>
+                    <div class="fp-field">
+                        <label>Updated</label>
+                        <select>
+                            <option>Any time</option>
+                            <option>Last 24h</option>
+                            <option>Last week</option>
+                        </select>
+                    </div>
+                </div>
+            </FilterPanel>
+        </div>
+
+        <div v-if="activeFilterChips.length" class="mp-chips-active">
+            <span v-for="f in activeFilterChips" :key="f.key" class="mp-chip-active-tag">
+                {{ f.label }}
+                <button type="button" class="mp-chip-active-x" @click="f.remove()" aria-label="Remove filter">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+            </span>
         </div>
 
         <!-- Status chips -->
@@ -259,13 +335,13 @@ function avatarColor(initials) {
 
         <ConfirmModal
             v-if="showDeleteConfirm"
-            :title="`Delete ${selectedIds.size} request${selectedIds.size > 1 ? 's' : ''}?`"
+            :title="deleteTarget ? `Delete ${deleteTarget.id}?` : `Delete ${selectedIds.size} request${selectedIds.size > 1 ? 's' : ''}?`"
             message="This cannot be undone."
             confirm-text="Delete"
             loading-text="Deleting…"
             :loading="deleting"
             danger
-            @cancel="showDeleteConfirm = false"
+            @cancel="showDeleteConfirm = false; deleteTarget = null"
             @confirm="deleteSelected"
         >
             <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
@@ -279,6 +355,7 @@ function avatarColor(initials) {
                         <th><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="toggleSelectAll"/></th>
                         <th>ID</th>
                         <th>Venue · Site</th>
+                        <th>Space</th>
                         <th class="ta-c">Items</th>
                         <th v-if="showItemValues" class="ta-c">Value</th>
                         <th>Status</th>
@@ -305,6 +382,11 @@ function avatarColor(initials) {
                             <div class="mp-dt-venue">{{ venueOf(r.venue).name }}</div>
                             <div class="mp-dt-site">{{ r.site }}</div>
                         </td>
+                        <td>
+                            <div v-if="r.spaceLabel || r.areaLabel">{{ r.spaceLabel || '—' }}</div>
+                            <div v-if="r.areaLabel" class="mp-dt-site">{{ r.areaLabel }}</div>
+                            <span v-if="!r.spaceLabel && !r.areaLabel" class="mp-muted">—</span>
+                        </td>
                         <td class="ta-c mono">{{ r.items }}</td>
                         <td v-if="showItemValues" class="ta-c mono">{{ fmtMoney(r.value) }}</td>
                         <td>
@@ -323,11 +405,17 @@ function avatarColor(initials) {
                         <td class="mp-dt-when">{{ r.updated }}</td>
                         <td class="mp-dt-go" @click.stop>
                             <button
-                                v-if="r.status === 'draft'"
+                                v-if="r.status === 'draft' || permissions.isAdmin"
                                 class="mp-icon-btn mp-icon-edit"
-                                title="Edit draft"
+                                :title="r.status === 'draft' ? 'Edit draft' : 'Edit request'"
                                 @click="emit('go-to', 'new', { editCode: r.id })"
                             ><i class="bx bx-pencil"></i></button>
+                            <button
+                                v-if="permissions.isAdmin"
+                                class="mp-icon-btn mp-icon-del"
+                                title="Delete request"
+                                @click="confirmDeleteOne(r)"
+                            ><i class="bx bx-trash"></i></button>
                             <button
                                 class="mp-icon-btn"
                                 title="Open full detail"
@@ -336,7 +424,7 @@ function avatarColor(initials) {
                         </td>
                     </tr>
                     <tr v-if="expandedId === r.id" class="mp-dt-expand-row">
-                        <td colspan="10">
+                        <td colspan="11">
                             <div v-if="expandedLoading.has(r.id)" class="mp-dt-expand-status">Loading items…</div>
                             <div v-else-if="expandedError[r.id]" class="mp-dt-expand-status mp-dt-expand-error">{{ expandedError[r.id] }}</div>
                             <div v-else-if="!expandedData[r.id]?.lines?.length" class="mp-dt-expand-status">No line items on this request.</div>
@@ -421,24 +509,41 @@ function avatarColor(initials) {
 .mp-ab-warn .mp-ab-n { color: #991b1b; }
 .mp-ab-actions { display: flex; gap: 8px; margin-left: auto; }
 
-.mp-filterbar {
-    display: grid; grid-template-columns: 1.6fr repeat(5, 1fr);
-    gap: 8px; margin-bottom: 12px;
-}
+.mp-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .mp-fb-search {
     display: flex; align-items: center; gap: 8px;
     background: #fff; border: 1px solid #e8e4db; border-radius: 6px;
-    padding: 6px 10px; color: #76706a;
+    padding: 6px 10px; color: #76706a; flex: 1;
 }
 .mp-fb-search input { border: none; outline: none; font-size: 12.5px; background: transparent; flex: 1; color: #1a1614; }
-.mp-fb-sel { display: flex; flex-direction: column; gap: 3px; }
-.mp-fb-sel label { font-size: 10.5px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; padding-left: 2px; }
-.mp-fb-sel select {
+
+/* ── Filter panel sections (rendered inside <FilterPanel>'s slot) ───────────── */
+.fp-section { padding: 14px 0; border-bottom: 1px solid #efece4; }
+.fp-section:first-child { padding-top: 0; }
+.fp-section:last-child { padding-bottom: 0; border-bottom: none; }
+.fp-section-title { font-size: 11px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 10px; }
+.fp-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.fp-field:last-child { margin-bottom: 0; }
+.fp-field label { font-size: 10.5px; color: #76706a; text-transform: uppercase; letter-spacing: .06em; }
+.fp-field select {
     appearance: none;
     background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%2376706a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
     border: 1px solid #e8e4db; border-radius: 6px;
-    padding: 6px 24px 6px 10px; font-size: 12.5px; color: #1a1614; cursor: pointer;
+    padding: 7px 24px 7px 10px; font-size: 12.5px; color: #1a1614; cursor: pointer;
 }
+
+/* ── Active filter chips (distinct from the status chip row below) ──────────── */
+.mp-chips-active { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mp-chip-active-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500; color: #3d3833; background: #efece4;
+    padding: 4px 6px 4px 10px; border-radius: 20px;
+}
+.mp-chip-active-x {
+    width: 15px; height: 15px; border-radius: 50%; border: none; background: rgba(61,56,51,.12);
+    color: #3d3833; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.mp-chip-active-x:hover { background: rgba(61,56,51,.25); }
 
 .mp-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .mp-chip {
@@ -472,6 +577,8 @@ function avatarColor(initials) {
 .mp-icon-btn:hover { background: #fbfaf6; color: #1a1614; }
 .mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
 .mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
 .mp-dt-foot { font-size: 12px; color: #76706a; text-align: right; margin-top: 8px; }
 
 .mp-dt-chevron { font-size: 15px; vertical-align: -2px; margin-right: 2px; color: #a39d96; }

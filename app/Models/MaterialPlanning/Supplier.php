@@ -21,8 +21,8 @@ class Supplier extends Model
         return $this->belongsTo(GlobalStatus::class, 'status_id');
     }
 
-    public function serviceOptions()
+    public function serviceOptionItems()
     {
-        return $this->hasMany(ServiceOption::class, 'supplier_id');
+        return $this->hasMany(ServiceOptionItem::class, 'supplier_id');
     }
 }

@@ -5,6 +5,7 @@ import axios from 'axios';
 
 import DashboardView   from './views/DashboardView.vue';
 import RequestsView    from './views/RequestsView.vue';
+import ItemsView       from './views/ItemsView.vue';
 import ApprovalsView   from './views/ApprovalsView.vue';
 import NewRequestView  from './views/NewRequestView.vue';
 import CatalogView     from './views/CatalogView.vue';
@@ -36,6 +37,7 @@ const props = defineProps({
     classifications: Array,
     people:         Array,
     requests:       Array,
+    requestLines:   { type: Array, default: () => [] },
     catalog:        Array,
     suppliers:      Array,
     areas:          Array,
@@ -43,6 +45,7 @@ const props = defineProps({
     itemGroups:     Array,
     itemSubgroups:  Array,
     serviceOptions: Array,
+    serviceOptionItems: { type: Array, default: () => [] },
     changeOrders:   Array,
     coStates:       Object,
     permissions:    Object,
@@ -100,6 +103,7 @@ const nav = computed(() => {
     return [
         { id: 'dash',      label: 'Dashboard',    icon: 'bx bx-grid-alt',       badge: null },
         { id: 'requests',  label: 'Requests',     icon: 'bx bx-list-ul',         badge: draftCount ? String(draftCount) : null },
+        { id: 'items',     label: 'Items',        icon: 'bx bx-package',         badge: null },
         { id: 'new',       label: 'New Request',  icon: 'bx bx-plus-circle',     badge: null },
         { id: 'catalog',   label: 'Catalog',      icon: 'bx bx-book-open',       badge: null },
         { id: 'options',   label: 'Service Options', icon: 'bx bx-purchase-tag', badge: null },
@@ -168,7 +172,7 @@ function goTo(id, payload = null) {
 // server rather than faking it client-side. Only navigate to the Requests list when
 // the request was actually submitted — a draft save should keep the user on the form.
 function onRequestSaved(navigate = true) {
-    router.reload({ only: ['requests', 'people'], onFinish: () => { if (navigate) goTo('requests'); } });
+    router.reload({ only: ['requests', 'requestLines', 'people'], onFinish: () => { if (navigate) goTo('requests'); } });
 }
 
 // Requests were bulk-deleted, or the user clicked the refresh icon, in
@@ -176,7 +180,7 @@ function onRequestSaved(navigate = true) {
 const requestsRefreshing = ref(false);
 function refreshRequests() {
     requestsRefreshing.value = true;
-    router.reload({ only: ['requests'], onFinish: () => { requestsRefreshing.value = false; } });
+    router.reload({ only: ['requests', 'requestLines'], onFinish: () => { requestsRefreshing.value = false; } });
 }
 
 // ── User menu ──────────────────────────────────────────────────────────────
@@ -536,14 +540,33 @@ onMounted(async () => {
                     :statuses="statuses"
                     :people="people"
                     :functional-areas="functionalAreas"
+                    :areas="areas"
+                    :spaces="spaces"
                     :refreshing="requestsRefreshing"
                     :show-item-values="showItemValues"
                     :event="activeEvent"
                     :approval-only="false"
+                    :permissions="permissions"
                     @open-request="openRequest"
                     @go-to="goTo"
                     @requests-deleted="refreshRequests"
                     @refresh="refreshRequests"
+                />
+
+                <ItemsView
+                    v-else-if="activePage === 'items'"
+                    :request-lines="requestLines"
+                    :domains="domains"
+                    :venues="venues"
+                    :functional-areas="functionalAreas"
+                    :people="people"
+                    :spaces="spaces"
+                    :areas="areas"
+                    :service-options="serviceOptions"
+                    :suppliers="suppliers"
+                    :permissions="permissions"
+                    :event="activeEvent"
+                    @open-request="openRequest"
                 />
 
                 <ApprovalsView
@@ -589,18 +612,20 @@ onMounted(async () => {
                     :domains="domains"
                     :suppliers="suppliers"
                     :service-options="serviceOptions"
+                    :permissions="permissions"
                     :event="activeEvent"
                     @go-to="goTo"
                 />
 
                 <ServiceOptionsView
                     v-else-if="activePage === 'options'"
-                    :catalog="catalog"
-                    :domains="domains"
                     :suppliers="suppliers"
                     :service-options="serviceOptions"
-                    :people="people"
+                    :service-option-items="serviceOptionItems"
                     :classifications="classifications"
+                    :item-groups="itemGroups"
+                    :item-subgroups="itemSubgroups"
+                    :permissions="permissions"
                     :event="activeEvent"
                 />
 
@@ -701,6 +726,8 @@ onMounted(async () => {
                     :catalog="catalog"
                     :suppliers="suppliers"
                     :service-options="serviceOptions"
+                    :service-option-items="serviceOptionItems"
+                    :classifications="classifications"
                     :permissions="permissions"
                     :show-item-values="showItemValues"
                     @go-to="goTo"

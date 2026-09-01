@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 const props = defineProps({
     sku:             { type: String, required: true },
     itemName:        { type: String, default: '' },
+    itemSubGroup:    { type: String, default: null },
     serviceOptions:  { type: Array, default: () => [] },
     suppliers:       { type: Array, default: () => [] },
     currentOptionId: { type: [Number, String], default: null },
@@ -13,7 +14,19 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'assign', 'create-new']);
 
-const options = computed(() => props.serviceOptions.filter(o => o.sku === props.sku));
+// Bundles are no longer scoped to a SKU — any active bundle can be assigned to any request item.
+const activeOptions = computed(() => props.serviceOptions.filter(o => o.classificationName !== 'Suspended'));
+
+// Narrow to bundles whose Item subgroup matches this item's — but only when
+// that actually leaves something to pick, so an item with no subgroup (or no
+// matching bundle yet) doesn't end up with an empty, unassignable list.
+const options = computed(() => {
+    if (!props.itemSubGroup) return activeOptions.value;
+    const target = props.itemSubGroup.trim().toLowerCase();
+    const matches = activeOptions.value.filter(o => (o.itemSubgroupLabel || '').trim().toLowerCase() === target);
+    return matches.length ? matches : activeOptions.value;
+});
+const isFiltered = computed(() => props.itemSubGroup && options.value.length < activeOptions.value.length);
 const selectedId = ref(props.currentOptionId ?? null);
 
 function supplierOf(code) { return props.suppliers.find(s => s.code === code); }
@@ -37,8 +50,11 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <header class="skum-hd">
                     <div class="skum-hd-l">
                         <div class="skum-hd-tag"><span class="mono">{{ sku }}</span><span>·</span><span>Assign service</span></div>
-                        <h2 class="skum-title">Assign service to this line</h2>
-                        <p class="skum-sub">Pick which supplier option fulfills {{ itemName || sku }} on this request.</p>
+                        <h2 class="skum-title">Assign a service bundle to this line</h2>
+                        <p class="skum-sub">
+                            Pick which bundle fulfills {{ itemName || sku }} on this request — every service in the bundle applies to this line.
+                            <template v-if="isFiltered"> Showing bundles in the <b>{{ itemSubGroup }}</b> subgroup.</template>
+                        </p>
                     </div>
                     <button class="skum-x" @click="close" aria-label="Close">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -47,7 +63,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 
                 <div class="skum-body">
                     <div v-if="!options.length" class="asm-empty">
-                        <p>No service options exist yet for this item.</p>
+                        <p>No service option bundles exist yet.</p>
                         <button class="mp-btn" @click="emit('create-new')">+ Create a new service option</button>
                     </div>
 
@@ -64,13 +80,12 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                     <span v-if="o.isDefault" class="asm-opt-default">Default</span>
                                 </div>
                                 <div class="asm-opt-meta">
-                                    <span>{{ supplierOf(o.supplier)?.name ?? o.supplier }}</span>
-                                    <span>·</span>
-                                    <span class="mono">{{ fmtMoney(o.cost) }}</span>
+                                    <span class="mono">{{ fmtMoney(o.cost) }} total</span>
                                     <span>·</span>
                                     <span>{{ o.lead }}d lead</span>
-                                    <span v-if="o.sla">·</span>
-                                    <span v-if="o.sla">{{ o.sla }}</span>
+                                </div>
+                                <div v-if="o.services?.length" class="asm-opt-svcs">
+                                    <span v-for="s in o.services" :key="s.id" class="asm-svc-chip">{{ s.name }} · {{ supplierOf(s.supplier)?.name ?? s.supplier }}</span>
                                 </div>
                             </div>
                         </label>
@@ -168,6 +183,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     background: rgba(15,118,110,.12); padding: 1px 7px; border-radius: 20px;
 }
 .asm-opt-meta { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: #76706a; margin-top: 3px; }
+.asm-opt-svcs { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+.asm-svc-chip { font-size: 11px; color: #3d3833; background: #efece4; padding: 2px 7px; border-radius: 20px; }
 
 .asm-addnew {
     background: none; border: none; padding: 0;

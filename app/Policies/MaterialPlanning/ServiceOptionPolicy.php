@@ -2,7 +2,6 @@
 
 namespace App\Policies\MaterialPlanning;
 
-use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ServiceOption;
 use App\Models\User;
 
@@ -19,16 +18,17 @@ class ServiceOptionPolicy
     }
 
     /**
-     * No instance exists yet — check against the catalog item the option would belong to.
+     * Service option bundles are no longer scoped to a catalog item's domain,
+     * so bundle management (unlike assigning one to a request line) is admin-only.
      */
-    public function createForItem(User $user, CatalogItem $item): bool
+    public function create(User $user): bool
     {
-        return $user->hasRole('admin') || $user->managed_domain === $item->domain_code;
+        return $user->hasRole('admin');
     }
 
     public function update(User $user, ServiceOption $option): bool
     {
-        return $user->hasRole('admin') || $user->managed_domain === $option->domain;
+        return $user->hasRole('admin');
     }
 
     public function delete(User $user, ServiceOption $option): bool

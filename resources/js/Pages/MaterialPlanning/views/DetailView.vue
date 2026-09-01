@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import axios from 'axios';
-import NewServiceOptionModal from '../components/NewServiceOptionModal.vue';
+import NewBundleModal from '../components/NewBundleModal.vue';
 import AssignServiceOptionModal from '../components/AssignServiceOptionModal.vue';
 import RaiseChangeOrderModal from '../components/RaiseChangeOrderModal.vue';
 
@@ -18,6 +18,8 @@ const props = defineProps({
     catalog:       { type: Array, default: () => [] },
     suppliers:     { type: Array, default: () => [] },
     serviceOptions: { type: Array, default: () => [] },
+    serviceOptionItems: { type: Array, default: () => [] },
+    classifications: { type: Array, default: () => [] },
     permissions:   { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     showItemValues: { type: Boolean, default: false },
 });
@@ -87,7 +89,7 @@ function canAddServiceOption(domain) {
 const assignTarget = ref(null);   // the request line being assigned an option
 const assignSaving = ref(false);
 const assignError = ref(null);
-const creatingNewOption = ref(false); // true = show NewServiceOptionModal for assignTarget instead
+const creatingNewOption = ref(false); // true = show NewBundleModal for assignTarget instead
 
 function openAssign(line) {
     assignTarget.value = line;
@@ -166,7 +168,7 @@ function avatarColor(name) {
             </div>
             <div class="mp-head-actions">
                 <button
-                    v-if="detailRequest.status === 'draft'"
+                    v-if="(detailRequest.status === 'draft' || permissions.isAdmin) && (detailTab === 'overview' || detailTab === 'items')"
                     class="mp-btn"
                     @click="emit('go-to', 'new', { editCode: detailRequest.code })"
                 ><i class="bx bx-pencil"></i> Edit</button>
@@ -234,7 +236,7 @@ function avatarColor(name) {
                             <tr><td class="mp-dm-lbl">Submitted</td><td>{{ fmtDate(detailRequest.submittedAt) }}</td></tr>
                             <tr><td class="mp-dm-lbl">Priority</td><td>{{ detailRequest.priority }}</td></tr>
                             <tr><td class="mp-dm-lbl">Items</td><td class="mono">{{ detailRequest.items }}</td></tr>
-                            <tr><td class="mp-dm-lbl">Total value</td><td class="mono">{{ fmtMoney(detailRequest.value) }}</td></tr>
+                            <tr v-if="showItemValues"><td class="mp-dm-lbl">Total value</td><td class="mono">{{ fmtMoney(detailRequest.value) }}</td></tr>
                             <tr><td class="mp-dm-lbl">Owner</td><td>{{ detailRequest.owner || '—' }}</td></tr>
                         </tbody>
                     </table>
@@ -284,6 +286,7 @@ function avatarColor(name) {
                 v-if="assignTarget && !creatingNewOption"
                 :sku="assignTarget.sku"
                 :item-name="assignTarget.name"
+                :item-sub-group="assignTarget.sub"
                 :service-options="serviceOptions"
                 :suppliers="suppliers"
                 :current-option-id="assignTarget.serviceOptionId"
@@ -294,12 +297,10 @@ function avatarColor(name) {
                 @create-new="switchToCreateNew"
             />
 
-            <NewServiceOptionModal
+            <NewBundleModal
                 v-if="assignTarget && creatingNewOption"
-                :catalog="catalog"
-                :suppliers="suppliers"
-                :domains="domains"
-                :locked-sku="assignTarget.sku"
+                :service-option-items="serviceOptionItems"
+                :classifications="classifications"
                 @close="closeAssign"
                 @add="onOptionCreated"
             />

@@ -12,6 +12,7 @@ use App\Models\MaterialPlanning\ItemGroup;
 use App\Models\MaterialPlanning\ItemSubgroup;
 use App\Models\MaterialPlanning\MaterialRequest;
 use App\Models\MaterialPlanning\ServiceOption;
+use App\Models\MaterialPlanning\ServiceOptionItem;
 use App\Models\MaterialPlanning\Space;
 use App\Models\MaterialPlanning\Supplier;
 use App\Models\User;
@@ -48,7 +49,7 @@ class MaterialPlanningSeeder extends Seeder
             $this->seedItemGroupsAndSubgroups();
             $catalog = $this->seedCatalog();
             $this->seedSuppliers();
-            $this->seedServiceOptions($catalog);
+            $this->seedServiceOptions();
             $requests = $this->seedRequests($catalog, $venueIds, $people, $event->id);
             $this->seedChangeOrders($requests, $catalog, $people);
         });
@@ -268,8 +269,15 @@ class MaterialPlanningSeeder extends Seeder
         }
     }
 
-    /** @param array<string, CatalogItem> $catalog */
-    private function seedServiceOptions(array $catalog): void
+    /**
+     * Service options are now a reusable library (`ServiceOptionItem`) that
+     * bundles (`ServiceOption`) pick from via a many-to-many pivot. Each seed
+     * row below becomes one reusable item plus a single-item bundle of the
+     * same name (preserving the "one bundle per historical option" shape a
+     * request line can assign), and a handful of combo bundles below that
+     * reuse two of those items each, to exercise reuse/usage-count for real.
+     */
+    private function seedServiceOptions(): void
     {
         $rows = [
             ['code' => 'SO-0450-VOD', 'sku' => 'IT-NW-0450', 'name' => 'Vodafone Managed Services',  'supplier_code' => 'SUP-VOD', 'cost' => 24800, 'lead_days' => 14, 'sla' => '4h on-site, 24/7',          'capacity' => 12,   'contract_reference' => 'CTR-FIC25-VOD-014', 'spec' => 'Wi-Fi 6E, 2,000 concurrent clients, dual uplink + LTE failover', 'status' => 'preferred', 'is_default' => true],
@@ -297,20 +305,52 @@ class MaterialPlanningSeeder extends Seeder
         ];
         $suppliersByCode = Supplier::pluck('id', 'code');
         $classificationByStatus = ['preferred' => 1, 'active' => 2, 'suspended' => 3];
+
+        $itemsByCode = [];
         foreach ($rows as $row) {
-            $sku = $row['sku'];
-            $supplierCode = $row['supplier_code'];
-            unset($row['sku'], $row['supplier_code']);
-            $row['catalog_item_id'] = $catalog[$sku]->id;
-            $row['supplier_id'] = $suppliersByCode[$supplierCode];
-            $row['classification_id'] = $classificationByStatus[$row['status']];
-            unset($row['status']);
-            ServiceOption::updateOrCreate(['code' => $row['code']], $row);
+            $itemsByCode[$row['code']] = ServiceOptionItem::updateOrCreate(['code' => $row['code']], [
+                'name' => $row['name'],
+                'supplier_id' => $suppliersByCode[$row['supplier_code']],
+                'cost' => $row['cost'],
+                'lead_days' => $row['lead_days'],
+                'sla' => $row['sla'],
+                'capacity' => $row['capacity'],
+                'contract_reference' => $row['contract_reference'],
+                'spec' => $row['spec'],
+            ]);
         }
 
-        // Every remaining SKU gets an own-pool fallback so no line is ever unservable.
-        foreach ($catalog as $item) {
-            $item->ensureOwnPoolOption();
+        foreach ($rows as $row) {
+            $bundle = ServiceOption::updateOrCreate(['code' => $row['code']], [
+                'name' => $row['name'],
+                'classification_id' => $classificationByStatus[$row['status']],
+                'status_id' => 1,
+                'is_default' => $row['is_default'] ?? false,
+            ]);
+
+            $bundle->services()->sync([$itemsByCode[$row['code']]->id => ['sort_order' => 0]]);
+        }
+
+        // A few bundles that combine more than one reusable item, so the
+        // library's reuse/usage-count feature has real data to show.
+        $combos = [
+            ['code' => 'SO-BND-NET01', 'name' => 'Vodafone network package (Wi-Fi + fiber)',  'status' => 'preferred', 'items' => ['SO-0450-VOD', 'SO-0460-VOD']],
+            ['code' => 'SO-BND-PWR01', 'name' => 'Aggreko power + GES structure',              'status' => 'active',    'items' => ['SO-0500-AGG', 'SO-1010-GES']],
+            ['code' => 'SO-BND-LNG01', 'name' => 'GES lounge + flooring package',              'status' => 'active',    'items' => ['SO-0101-GES', 'SO-0420-GES']],
+        ];
+        foreach ($combos as $combo) {
+            $bundle = ServiceOption::updateOrCreate(['code' => $combo['code']], [
+                'name' => $combo['name'],
+                'classification_id' => $classificationByStatus[$combo['status']],
+                'status_id' => 1,
+                'is_default' => false,
+            ]);
+
+            $pivot = [];
+            foreach (array_values($combo['items']) as $i => $itemCode) {
+                $pivot[$itemsByCode[$itemCode]->id] = ['sort_order' => $i];
+            }
+            $bundle->services()->sync($pivot);
         }
     }
 
@@ -347,6 +387,11 @@ class MaterialPlanningSeeder extends Seeder
 
         $notes = ['Per site layout', 'Confirmed with venue ops', 'Peak-day requirement', 'Spare pool included'];
 
+        // Bundles are no longer scoped to a catalog item, so seeded lines just
+        // draw from whichever bundles are marked default rather than "the
+        // default option for this SKU".
+        $defaultOptions = ServiceOption::where('is_default', true)->get();
+
         $requests = [];
         foreach ($headers as $mockId => $h) {
             $request = MaterialRequest::create([
@@ -369,7 +414,7 @@ class MaterialPlanningSeeder extends Seeder
             if (isset($explicitLines[$mockId])) {
                 foreach ($explicitLines[$mockId] as $l) {
                     $item = $catalog[$l['sku']];
-                    $option = $item->serviceOptions()->where('is_default', true)->first();
+                    $option = $defaultOptions->isNotEmpty() ? $defaultOptions->random() : null;
                     $request->lines()->create([
                         'catalog_item_id' => $item->id, 'qty' => $l['qty'], 'rate_snapshot' => $item->rate,
                         'comment' => $l['comment'], 'service_option_id' => $option?->id,
@@ -381,7 +426,7 @@ class MaterialPlanningSeeder extends Seeder
                 $share = $h['value'] / $n;
                 foreach (array_slice($pool, 0, $n) as $i => $item) {
                     $qty = (int) max(1, min(round($share / $item->rate), round(($item->baseline ?: 40) * 0.75)));
-                    $option = $item->serviceOptions()->where('is_default', true)->first();
+                    $option = $defaultOptions->isNotEmpty() ? $defaultOptions->random() : null;
                     $request->lines()->create([
                         'catalog_item_id' => $item->id, 'qty' => $qty, 'rate_snapshot' => $item->rate,
                         'comment' => $notes[$i % count($notes)], 'service_option_id' => $option?->id,
@@ -464,12 +509,16 @@ class MaterialPlanningSeeder extends Seeder
             $line = $lines->sortByDesc(fn ($l) => $l->qty * $l->rate_snapshot)->first();
 
             if ($row['reason'] === 'Service option change') {
-                $item = $catalog[$line->sku];
-                $altOption = $item->serviceOptions()->where('id', '!=', $line->service_option_id)->where('classification_id', '!=', 3)->first();
+                $altOption = ServiceOption::with('services')
+                    ->where('id', '!=', $line->service_option_id)
+                    ->where('classification_id', '!=', 3)
+                    ->inRandomOrder()
+                    ->first();
+                $altCost = $altOption ? $altOption->services->sum('cost') : null;
                 $changeOrder->lines()->create([
                     'request_line_id' => $line->id, 'catalog_item_id' => $line->catalog_item_id,
                     'qty_before' => $line->qty, 'qty_after' => $line->qty,
-                    'rate_before' => $line->rate_snapshot, 'rate_after' => $altOption?->cost ?? $line->rate_snapshot,
+                    'rate_before' => $line->rate_snapshot, 'rate_after' => $altCost ?? $line->rate_snapshot,
                     'service_option_before_id' => $line->service_option_id, 'service_option_after_id' => $altOption?->id,
                     'why' => 'Delivery switched to an alternative supplier option',
                 ]);

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
+import ConfirmModal from '../components/ConfirmModal.vue';
 
 const emit = defineEmits(['go-to']);
 
@@ -9,8 +10,11 @@ const props = defineProps({
     domains:        Array,
     suppliers:      { type: Array, default: () => [] },
     serviceOptions: { type: Array, default: () => [] },
+    permissions:    { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     event:          { type: Object, default: () => ({ code: 'EVT' }) },
 });
+
+function canManage(domain) { return props.permissions.isAdmin || props.permissions.managedDomain === domain; }
 
 // Local writable copy so we can optimistically add items
 const catalogItems = ref([...props.catalog]);
@@ -76,34 +80,6 @@ function stockColor(it) {
 }
 function supplierOf(code) { return props.suppliers.find(s => s.code === code) || props.suppliers[props.suppliers.length - 1] || { name: code }; }
 
-// ── Row expand — service options behind each SKU ─────────────────────────────
-const openSku = ref(null);
-function toggleRow(sku) { openSku.value = openSku.value === sku ? null : sku; }
-function optionsFor(sku) {
-    return props.serviceOptions
-        .filter(o => o.sku === sku)
-        .sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
-}
-function defaultOptionFor(sku) {
-    const opts = optionsFor(sku);
-    return opts.find(o => o.isDefault) || opts[0] || null;
-}
-
-const STATUS_COLORS = {
-    success: { bg: '#dcfce7', fg: '#166534' },
-    secondary: { bg: '#efece4', fg: '#3d3833' },
-    danger: { bg: '#fee2e2', fg: '#991b1b' },
-    warning: { bg: '#fef3c7', fg: '#92400e' },
-    info: { bg: '#dbeafe', fg: '#1e3a8a' },
-    primary: { bg: '#dbeafe', fg: '#1e3a8a' },
-};
-function colorMeta(colorKey) { return STATUS_COLORS[colorKey] || STATUS_COLORS.secondary; }
-function variance(cost, rate) {
-    const d = cost - rate;
-    if (!rate || d === 0) return { flat: true, text: 'at catalog' };
-    return { flat: false, pos: d > 0, text: (d > 0 ? '+' : '−') + fmtMoney(Math.abs(d)) };
-}
-
 // ── Add SKU modal ──────────────────────────────────────────────────────────
 const DOMAIN_PREFIX = { IT:'IT', LOG:'LG', PWR:'PW', OVR:'OV', FFE:'FE' };
 const UNIT_OPTS     = ['ea', 'm²', 'm', 'unit', 'kit', 'hr', 'day', 'set'];
@@ -111,6 +87,9 @@ const SOURCE_OPTS   = [{ id:'own', label:'Own pool' }, { id:'rental', label:'Ren
 
 const showAddSku = ref(false);
 const newRowSku  = ref(null);
+// Set when editing an existing SKU — the modal pre-fills, locks Domain + SKU
+// code (neither is updatable server-side), and PUTs instead of POSTs.
+const editTarget = ref(null);
 
 function freshForm() {
     return { domain:'IT', group:'', sub:'', name:'', unit:'ea', rate:'', baseline:'', stock:'', source:'own', notes:'', skuOverride:null };
@@ -129,23 +108,31 @@ const skuBaselinePct = computed(() => {
 const skuCovColor = computed(() => skuBaselinePct.value >= 80 ? '#16a34a' : skuBaselinePct.value >= 50 ? '#b45309' : '#dc2626');
 
 function openAddSku() {
+    editTarget.value = null;
     skuForm.value = freshForm();
     skuTail.value = String(100 + Math.floor(Math.random() * 8900)).padStart(4, '0');
     showAddSku.value = true;
 }
-function closeSkuModal() { showAddSku.value = false; }
+function openEdit(it) {
+    editTarget.value = it;
+    skuForm.value = {
+        domain: it.domain, group: it.group, sub: it.sub, name: it.name, unit: it.unit,
+        rate: String(it.rate), baseline: String(it.baseline), stock: String(it.stock),
+        source: 'own', notes: '', skuOverride: it.sku,
+    };
+    showAddSku.value = true;
+}
+function closeSkuModal() { showAddSku.value = false; editTarget.value = null; }
 
 const savingSku = ref(false);
 const skuError = ref(null);
 
-async function addToCatalog() {
+async function saveSku() {
     if (!skuValid.value || savingSku.value) return;
     savingSku.value = true;
     skuError.value = null;
     try {
-        const { data } = await axios.post(route('mp.catalog-items.store'), {
-            sku: sku.value,
-            domain_code: skuForm.value.domain,
+        const payload = {
             group: skuForm.value.group.trim(),
             sub: skuForm.value.sub.trim(),
             name: skuForm.value.name.trim(),
@@ -153,18 +140,52 @@ async function addToCatalog() {
             rate: +skuForm.value.rate,
             baseline: +skuForm.value.baseline,
             stock: +skuForm.value.stock || 0,
-        });
-        catalogItems.value.unshift(data);
+        };
+        let data;
+        if (editTarget.value) {
+            ({ data } = await axios.put(route('mp.catalog-items.update', editTarget.value.dbId), payload));
+            const idx = catalogItems.value.findIndex(i => i.sku === data.sku);
+            if (idx !== -1) catalogItems.value[idx] = data;
+        } else {
+            ({ data } = await axios.post(route('mp.catalog-items.store'), {
+                ...payload,
+                sku: sku.value,
+                domain_code: skuForm.value.domain,
+            }));
+            catalogItems.value.unshift(data);
+        }
         newRowSku.value = data.sku;
         setTimeout(() => { newRowSku.value = null; }, 2400);
         catDomain.value = 'all';
         closeSkuModal();
     } catch (e) {
         skuError.value = e.response?.status === 403
-            ? "You don't have permission to add a SKU for this domain."
+            ? "You don't have permission to save this SKU."
             : (e.response?.data?.errors?.sku?.[0] ?? 'Could not save this SKU. Please try again.');
     } finally {
         savingSku.value = false;
+    }
+}
+
+// ── Delete SKU ────────────────────────────────────────────────────────────
+const confirmDeleteItem = ref(null);
+const deletingItem = ref(false);
+const deleteItemError = ref(null);
+function askDelete(it) { confirmDeleteItem.value = it; deleteItemError.value = null; }
+async function confirmDelete() {
+    if (!confirmDeleteItem.value) return;
+    deletingItem.value = true;
+    deleteItemError.value = null;
+    try {
+        await axios.delete(route('mp.catalog-items.destroy', confirmDeleteItem.value.dbId));
+        catalogItems.value = catalogItems.value.filter(i => i.sku !== confirmDeleteItem.value.sku);
+        confirmDeleteItem.value = null;
+    } catch (e) {
+        deleteItemError.value = e.response?.status === 403
+            ? "You don't have permission to remove this SKU."
+            : 'Could not remove this SKU.';
+    } finally {
+        deletingItem.value = false;
     }
 }
 
@@ -180,7 +201,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Item catalog</h1>
-                <p class="mp-page-sub">{{ catalogItems.length }} active SKUs across {{ domains.length }} domains · {{ serviceOptions.length }} service options · click a row for its delivery options</p>
+                <p class="mp-page-sub">{{ catalogItems.length }} active SKUs across {{ domains.length }} domains · {{ serviceOptions.length }} service option bundles in Service options</p>
             </div>
             <div class="mp-head-actions">
                 <button class="mp-btn mp-btn-icon" title="Refresh catalog" @click="refreshCatalog">
@@ -283,7 +304,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 <th class="ta-r">Rate</th>
                                 <th>Unit</th>
                                 <th>Stock vs baseline</th>
-                                <th>Options</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -291,8 +311,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <template v-for="it in filteredCatalog" :key="it.sku">
                                 <tr
                                     class="cat-row"
-                                    :class="{ 'cat-row-new': it.sku === newRowSku, 'cat-row-open': openSku === it.sku }"
-                                    @click="toggleRow(it.sku)"
+                                    :class="{ 'cat-row-new': it.sku === newRowSku }"
                                 >
                                     <td>
                                         <span class="mp-dtag" :style="{ background: domainOf(it.domain).chip, color: domainOf(it.domain).color }">
@@ -319,49 +338,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="cat-opts">
-                                        <span class="mono cat-optn">{{ optionsFor(it.sku).length }}</span>
-                                        <span v-if="defaultOptionFor(it.sku)" class="cat-optd">
-                                            {{ supplierOf(defaultOptionFor(it.sku).supplier).name }}{{ optionsFor(it.sku).length > 1 ? ' default' : '' }}
-                                        </span>
-                                    </td>
-                                    <td class="ta-r"><button class="mp-btn mp-btn-sm" @click.stop="emit('go-to', 'new', it)">+ Add</button></td>
-                                </tr>
-                                <tr v-if="openSku === it.sku" class="cat-exp">
-                                    <td colspan="8">
-                                        <div class="cat-exp-inner">
-                                            <div class="cat-exp-h">Service options — how this item can be delivered</div>
-                                            <table class="optlist">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Option</th><th>Supplier</th><th class="ta-r">Unit cost</th><th class="ta-r">vs catalog</th>
-                                                        <th class="ta-r">Lead</th><th>SLA</th><th class="ta-r">Cap / venue</th><th>Contract</th><th>Classification</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <tr v-for="o in optionsFor(it.sku)" :key="o.id">
-                                                        <td>
-                                                            <div class="opt-name">{{ o.name }}<span v-if="o.isDefault" class="opt-def">default</span></div>
-                                                            <div class="opt-spec">{{ o.spec }}</div>
-                                                        </td>
-                                                        <td class="opt-sup">{{ supplierOf(o.supplier).name }}</td>
-                                                        <td class="ta-r mono">{{ fmtMoney(o.cost) }}</td>
-                                                        <td class="ta-r">
-                                                            <span v-if="variance(o.cost, it.rate).flat" class="opt-var-flat">at catalog</span>
-                                                            <span v-else class="mono" :class="variance(o.cost, it.rate).pos ? 'diff-pos' : 'diff-neg'">{{ variance(o.cost, it.rate).text }}</span>
-                                                        </td>
-                                                        <td class="ta-r mono">{{ o.lead }} d</td>
-                                                        <td class="opt-sla">{{ o.sla }}</td>
-                                                        <td class="ta-r mono">{{ o.capacity || '—' }}</td>
-                                                        <td class="mono opt-sup-sub">{{ o.contract }}</td>
-                                                        <td><span class="opt-status" :style="{ background: colorMeta(o.classificationColor).bg, color: colorMeta(o.classificationColor).fg }">{{ o.classificationName || '—' }}</span></td>
-                                                    </tr>
-                                                    <tr v-if="!optionsFor(it.sku).length">
-                                                        <td colspan="9" class="cat-exp-empty">No service options registered for this SKU yet.</td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                    <td class="ta-r cat-row-actions">
+                                        <button class="mp-btn mp-btn-sm" @click.stop="emit('go-to', 'new', it)">+ Add</button>
+                                        <button v-if="canManage(it.domain)" class="mp-icon-btn mp-icon-edit" title="Edit" @click.stop="openEdit(it)"><i class="bx bx-pencil"></i></button>
+                                        <button v-if="canManage(it.domain)" class="mp-icon-btn mp-icon-del" title="Delete" @click.stop="askDelete(it)"><i class="bx bx-trash"></i></button>
                                     </td>
                                 </tr>
                             </template>
@@ -412,8 +392,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <span>·</span>
                             <span>Catalog</span>
                         </div>
-                        <h2 class="skum-title">Add SKU</h2>
-                        <p class="skum-sub">Register a new catalog item. Baseline drives stock coverage and procurement gap reports.</p>
+                        <h2 class="skum-title">{{ editTarget ? 'Edit SKU' : 'Add SKU' }}</h2>
+                        <p class="skum-sub">{{ editTarget ? 'Update this catalog item. Domain and SKU code can\'t be changed once created.' : 'Register a new catalog item. Baseline drives stock coverage and procurement gap reports.' }}</p>
                     </div>
                     <button class="skum-x" @click="closeSkuModal">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -431,7 +411,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         </div>
                         <div class="field" style="margin-bottom:14px">
                             <label class="field-lbl">Domain</label>
-                            <div class="skum-domains">
+                            <div v-if="!editTarget" class="skum-domains">
                                 <button v-for="d in domains" :key="d.id" type="button"
                                     class="skum-dom" :class="{ 'skum-dom-on': skuForm.domain === d.code }"
                                     :style="skuForm.domain === d.code ? { borderColor: d.color, background: d.chip } : {}"
@@ -442,6 +422,12 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                     </span>
                                     <span class="skum-dom-desc">{{ d.desc ?? d.label }}</span>
                                 </button>
+                            </div>
+                            <div v-else class="skum-preview">
+                                <span class="mp-dtag" :style="{ background: domainOf(skuForm.domain).chip, color: domainOf(skuForm.domain).color }">
+                                    {{ domainOf(skuForm.domain).label }}
+                                </span>
+                                <span class="field-hint">Locked — a SKU can't change domain once created.</span>
                             </div>
                         </div>
                         <div class="skum-grid skum-grid-2">
@@ -471,14 +457,14 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <div class="field">
                                 <label class="field-lbl">SKU code</label>
                                 <div class="skum-skubox">
-                                    <input class="mono" type="text" :value="sku"
+                                    <input class="mono" type="text" :value="sku" :disabled="!!editTarget"
                                         @input="skuForm.skuOverride = $event.target.value" />
-                                    <button type="button" class="skum-skubtn" title="Regenerate from domain + group"
+                                    <button v-if="!editTarget" type="button" class="skum-skubtn" title="Regenerate from domain + group"
                                         @click="skuForm.skuOverride = null; skuTail = String(100 + Math.floor(Math.random() * 8900)).padStart(4,'0')">
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 3 6.7M3 21v-5h5"/></svg>
                                     </button>
                                 </div>
-                                <span class="field-hint">Auto-generated from domain + group. Edit if you have an existing supplier code.</span>
+                                <span class="field-hint">{{ editTarget ? 'Locked — can\'t be changed once created.' : 'Auto-generated from domain + group. Edit if you have an existing supplier code.' }}</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Catalog preview</label>
@@ -595,7 +581,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <span class="skum-ft-dot" style="background:#b45309"></span>{{ skuError }}
                         </span>
                         <span v-else-if="skuValid" class="skum-ft-ok">
-                            <span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add
+                            <span class="skum-ft-dot" style="background:#16a34a"></span>Ready to {{ editTarget ? 'save' : 'add' }}
                         </span>
                         <span v-else class="skum-ft-warn">
                             <span class="skum-ft-dot" style="background:#b45309"></span>Name, group, rate &amp; baseline required
@@ -603,13 +589,26 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                     <div class="skum-ft-r">
                         <button class="mp-btn" @click="closeSkuModal">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!skuValid || savingSku" @click="addToCatalog">{{ savingSku ? 'Adding…' : 'Add to catalog' }}</button>
+                        <button class="mp-btn mp-btn-primary" :disabled="!skuValid || savingSku" @click="saveSku">{{ savingSku ? (editTarget ? 'Saving…' : 'Adding…') : (editTarget ? 'Save changes' : 'Add to catalog') }}</button>
                     </div>
                 </footer>
 
             </div>
         </div>
     </Teleport>
+
+    <ConfirmModal
+        v-if="confirmDeleteItem"
+        :title="`Remove ${confirmDeleteItem.sku}?`"
+        confirm-text="Remove"
+        loading-text="Removing…"
+        :loading="deletingItem"
+        danger
+        @cancel="confirmDeleteItem = null"
+        @confirm="confirmDelete"
+    >
+        <p v-if="deleteItemError" class="cfm-err">{{ deleteItemError }}</p>
+    </ConfirmModal>
 </template>
 
 <style scoped>
@@ -715,51 +714,19 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     padding: 10px 14px; text-align: left; white-space: nowrap;
 }
 .mp-dt td { padding: 11px 14px; border-bottom: 1px solid #f3f0ea; vertical-align: middle; color: #1a1614; }
-.cat-row { cursor: pointer; transition: background .12s; }
+.cat-row { transition: background .12s; }
 .cat-row:hover { background: #fbfaf6; }
-.cat-row-open { background: #f6f5f1; }
 .cat-row:last-child td { border-bottom: none; }
 .cat-name { font-weight: 500; }
 .cat-grp { font-size: 11px; color: #76706a; margin-top: 2px; }
 
-.cat-opts { display: flex; flex-direction: column; gap: 2px; }
-.cat-optn {
-    display: inline-block; font-size: 11px; font-weight: 700; color: #1a1614;
-    background: #efece4; padding: 1px 7px; border-radius: 10px; width: fit-content;
-}
-.cat-optd { font-size: 11px; color: #76706a; }
-
-/* ── Expanded row — service options for this SKU ─────────────────────────── */
-.cat-exp td { padding: 0; border-bottom: 1px solid #f3f0ea; background: #fbfaf6; }
-.cat-exp-inner { padding: 14px 20px 18px; }
-.cat-exp-h {
-    font-size: 11px; font-weight: 600; color: #76706a; text-transform: uppercase; letter-spacing: .05em;
-    padding: 0 0 8px;
-}
-.cat-exp-empty { padding: 10px 0 4px; font-size: 12.5px; color: #76706a; }
-.cat-exp .optlist { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.cat-exp .optlist th {
-    text-align: left; font-size: 10.5px; font-weight: 600; color: #a39d96;
-    text-transform: uppercase; letter-spacing: .05em; padding: 4px 14px 6px 0; white-space: nowrap;
-}
-.cat-exp .optlist td { padding: 8px 14px 8px 0; border-top: 1px solid #efece4; vertical-align: middle; }
-.cat-exp .optlist tbody tr:last-child td { padding-bottom: 4px; }
-.opt-name { font-weight: 500; display: flex; align-items: center; gap: 6px; }
-.opt-def {
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-    background: #ccfbf1; color: #0f766e; padding: 1px 6px; border-radius: 4px;
-}
-.opt-spec { font-size: 11px; color: #76706a; margin-top: 2px; max-width: 260px; }
-.opt-sup { font-weight: 500; }
-.opt-sup-sub { color: #76706a; }
-.opt-sla { color: #3d3833; }
-.opt-var-flat { font-size: 12px; color: #76706a; }
-.diff-pos { color: #166534; }
-.diff-neg { color: #991b1b; }
-.opt-status {
-    display: inline-flex; align-items: center; padding: 2px 8px;
-    border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
-}
+.cat-row-actions { display: flex; gap: 4px; justify-content: flex-end; white-space: nowrap; }
+.mp-icon-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px; transition: background .15s; }
+.mp-icon-edit { background: #fff7e6; border-color: #fde7b0; color: #d97706; }
+.mp-icon-edit:hover { background: #fef3c7; }
+.mp-icon-del { background: #fff1f2; border-color: #fecdd3; color: #dc2626; }
+.mp-icon-del:hover { background: #ffe4e6; }
+.cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
 .mp-dtag {
     display: inline-flex; align-items: center; gap: 4px;
@@ -896,6 +863,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     flex: 1; border: none; border-radius: 0; padding: 8px 10px;
     font-size: 13px; color: #1a1614; background: transparent; outline: none;
 }
+.skum-skubox input:disabled { color: #76706a; background: #fbfaf6; cursor: not-allowed; }
 .skum-skubtn {
     border: none; border-left: 1px solid #e8e4db; padding: 0 10px;
     background: #fbfaf6; cursor: pointer; color: #76706a;
