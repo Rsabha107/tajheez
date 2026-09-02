@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import { usePage } from '@inertiajs/vue3';
 import axios from 'axios';
+import FormModal from './FormModal.vue';
+import ProgressButton from './ProgressButton.vue';
 
 const props = defineProps({
     request:        { type: Object, required: true }, // detailRequest — needs .id (numeric PK) + .code
@@ -138,27 +140,19 @@ async function raise() {
 }
 
 function close() { emit('close'); }
-function onEsc(e) { if (e.key === 'Escape') close(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
-    <Teleport to="body">
-        <div class="skum-scrim" @click.self="close">
-            <div class="skum nco" role="dialog" aria-modal="true">
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag"><span class="mono">{{ request.code }}</span><span>·</span><span>Change order</span></div>
-                        <h2 class="skum-title">Raise change order</h2>
-                        <p class="skum-sub">Adjust quantities, switch the service option, or drop lines against the approved baseline. The diff is sent back through the approval path.</p>
-                    </div>
-                    <button class="skum-x" @click="close" aria-label="Close">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
+    <FormModal
+        max-width="900px"
+        title="Raise change order"
+        subtitle="Adjust quantities, switch the service option, or drop lines against the approved baseline. The diff is sent back through the approval path."
+        @close="close"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ request.code }}</span><span>·</span><span>Change order</span>
+        </template>
 
-                <div class="skum-body">
                     <section class="skum-sec">
                         <div class="skum-sec-h"><span class="skum-sec-t">Change order details</span></div>
                         <div class="form-grid">
@@ -253,36 +247,26 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <section v-else class="skum-sec">
                         <div class="nco-route">Changed lines are sent back through the approval path for the affected category lead(s) to re-approve.</div>
                     </section>
-                </div>
 
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
-                        <span v-else-if="valid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to raise</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Add a title and change a quantity or service option</span>
-                    </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="close">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!valid || saving" @click="raise">{{ saving ? 'Raising…' : 'Raise change order' }}</button>
-                    </div>
-                </footer>
-            </div>
-        </div>
-    </Teleport>
+        <template #footer-left>
+            <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
+            <span v-else-if="valid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to raise</span>
+            <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Add a title and change a quantity or service option</span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :disabled="!valid"
+                :loading="saving"
+                text="Raise change order"
+                loading-text="Raising…"
+                @click="raise"
+            />
+        </template>
+    </FormModal>
 </template>
 
 <style scoped>
-.mp-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 12px; border-radius: 6px;
-    border: 1px solid #e8e4db; background: #fff;
-    font-size: 12.5px; font-weight: 500; color: #1a1614; cursor: pointer; transition: background .12s, border-color .12s;
-}
-.mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
-.mp-btn:disabled { opacity: .4; cursor: not-allowed; }
-.mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
-.mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
-
 .mp-empty { font-size: 13px; color: #76706a; padding: 20px; text-align: center; }
 .mp-avatar {
     display: inline-flex; align-items: center; justify-content: center;
@@ -296,44 +280,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 .ta-r { text-align: right; }
 
-/* ── Modal shell (shares skum shell used across Material Planning modals) ── */
-@keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
-}
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 640px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
-}
-.skum.nco { max-width: 900px; }
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
-}
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
-}
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px; transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 62vh; }
 .skum-sec { padding: 20px 0; border-bottom: 1px solid #efece4; }
 .skum-sec:last-child { border-bottom: none; }
 .skum-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
@@ -348,11 +294,11 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus, .field textarea:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
-.skum-body > .skum-sec > textarea {
+.skum-sec > textarea {
     width: 100%; border: 1px solid #e8e4db; border-radius: 7px; padding: 8px 11px;
     font-size: 13px; color: #1a1614; background: #fff; outline: none; resize: vertical; font-family: inherit; transition: border-color .12s;
 }
-.skum-body > .skum-sec > textarea:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.skum-sec > textarea:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
 .sel { position: relative; display: flex; align-items: center; }
 .sel select {
     width: 100%; appearance: none; border: 1px solid #e8e4db; border-radius: 7px;
@@ -401,13 +347,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .nco-route { margin-top: 12px; font-size: 12.5px; line-height: 1.5; color: #3d3833; border-left: 2px solid #efece4; padding-left: 11px; }
 .nco-route-warn { border-left-color: #b45309; }
 
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px; border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
 .skum-ft-ok, .skum-ft-warn { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .skum-ft-ok   { color: #16a34a; }
 .skum-ft-warn { color: #b45309; }

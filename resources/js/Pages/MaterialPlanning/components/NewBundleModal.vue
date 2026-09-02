@@ -1,6 +1,8 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import axios from 'axios';
+import FormModal from './FormModal.vue';
+import ProgressButton from './ProgressButton.vue';
 
 const props = defineProps({
     serviceOptionItems: { type: Array, default: () => [] },
@@ -16,11 +18,13 @@ const emit = defineEmits(['close', 'add']);
 
 function fmtMoney(n) { return '$' + Number(n || 0).toLocaleString('en-US'); }
 
+function defaultClassificationId() { return props.classifications.find(c => c.name === 'Normal')?.id ?? props.classifications[0]?.id ?? null; }
+
 function freshForm() {
     if (props.editOption) {
         return {
             name: props.editOption.name,
-            classificationId: props.editOption.classificationId ?? props.classifications[0]?.id ?? null,
+            classificationId: props.editOption.classificationId ?? defaultClassificationId(),
             isDefault: props.editOption.isDefault,
             // A bundle's embedded `services` rows carry the item's real numeric id.
             itemIds: (props.editOption.services || []).map(s => s.id),
@@ -30,7 +34,7 @@ function freshForm() {
     }
     return {
         name: '',
-        classificationId: props.classifications[0]?.id ?? null,
+        classificationId: defaultClassificationId(),
         isDefault: false,
         itemIds: [],
         itemGroupId: null,
@@ -75,7 +79,19 @@ function removeItem(id) {
 
 const bundleCost = computed(() => selectedItems.value.reduce((sum, i) => sum + (+i.cost || 0), 0));
 const bundleLead = computed(() => selectedItems.value.reduce((max, i) => Math.max(max, +i.lead || 0), 0));
-const formValid = computed(() => form.value.name.trim() && form.value.itemIds.length > 0);
+const formValid = computed(() =>
+    form.value.name.trim() && form.value.itemIds.length > 0 &&
+    !!form.value.itemGroupId && !!form.value.itemSubgroupId
+);
+// Only surfaced once the user tries to save with something missing, so the
+// modal doesn't open already covered in red.
+const attemptedSave = ref(false);
+const fieldErrors = computed(() => ({
+    name: attemptedSave.value && !form.value.name.trim(),
+    items: attemptedSave.value && form.value.itemIds.length === 0,
+    itemGroupId: attemptedSave.value && !form.value.itemGroupId,
+    itemSubgroupId: attemptedSave.value && !form.value.itemSubgroupId,
+}));
 
 function close() { emit('close'); }
 
@@ -83,7 +99,8 @@ const saving = ref(false);
 const error = ref(null);
 
 async function addOption() {
-    if (!formValid.value || saving.value) return;
+    if (saving.value) return;
+    if (!formValid.value) { attemptedSave.value = true; return; }
     saving.value = true;
     error.value = null;
     try {
@@ -95,6 +112,7 @@ async function addOption() {
             item_group_id: form.value.itemGroupId,
             item_subgroup_id: form.value.itemSubgroupId,
         };
+        if (!props.editOption) payload.event_id = props.event.id;
         const { data } = props.editOption
             ? await axios.put(route('mp.service-options.update', props.editOption.dbId), payload)
             : await axios.post(route('mp.service-options.store'), payload);
@@ -108,33 +126,25 @@ async function addOption() {
     }
 }
 
-function onEsc(e) { if (e.key === 'Escape') close(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
-    <Teleport to="body">
-        <div class="skum-scrim" @click.self="close">
-            <div class="skum nso" role="dialog" aria-modal="true">
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Bundles</span></div>
-                        <h2 class="skum-title">{{ editOption ? 'Edit bundle' : 'New bundle' }}</h2>
-                        <p class="skum-sub">A bundle groups one or many service options that can be assigned to any request item together — assigning it applies every option below to that item.</p>
-                    </div>
-                    <button class="skum-x" @click="close" aria-label="Close">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
+    <FormModal
+        :title="editOption ? 'Edit bundle' : 'New bundle'"
+        subtitle="A bundle groups one or many service options that can be assigned to any request item together — assigning it applies every option below to that item."
+        @close="close"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ event.code }}</span><span>·</span><span>Bundles</span>
+        </template>
 
-                <div class="skum-body">
                     <section class="skum-sec">
                         <div class="skum-sec-h"><span class="skum-sec-t">Bundle</span></div>
                         <div class="form-grid">
                             <div class="field" style="grid-column: span 2">
-                                <label class="field-lbl">Bundle name</label>
-                                <input v-model="form.name" placeholder="e.g. TV plus Ooredoo"/>
+                                <label class="field-lbl">Bundle name <span class="field-req">*</span></label>
+                                <input v-model="form.name" placeholder="e.g. TV plus Ooredoo" :class="{ 'field-bad': fieldErrors.name }"/>
+                                <span v-if="fieldErrors.name" class="field-err">Required</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Classification</label>
@@ -146,24 +156,26 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 </div>
                             </div>
                             <div class="field">
-                                <label class="field-lbl">Item group</label>
-                                <div class="sel">
+                                <label class="field-lbl">Item group <span class="field-req">*</span></label>
+                                <div class="sel" :class="{ 'sel-bad': fieldErrors.itemGroupId }">
                                     <select v-model="form.itemGroupId" @change="onGroupChange">
-                                        <option :value="null">No group</option>
+                                        <option :value="null" disabled>Select a group…</option>
                                         <option v-for="g in itemGroups" :key="g.id" :value="g.id">{{ g.domainLabel ? g.domainLabel + ' · ' : '' }}{{ g.label }}</option>
                                     </select>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                                 </div>
+                                <span v-if="fieldErrors.itemGroupId" class="field-err">Required</span>
                             </div>
                             <div class="field">
-                                <label class="field-lbl">Item subgroup</label>
-                                <div class="sel">
+                                <label class="field-lbl">Item subgroup <span class="field-req">*</span></label>
+                                <div class="sel" :class="{ 'sel-bad': fieldErrors.itemSubgroupId }">
                                     <select v-model="form.itemSubgroupId" :disabled="!form.itemGroupId">
-                                        <option :value="null">No subgroup</option>
+                                        <option :value="null" disabled>Select a subgroup…</option>
                                         <option v-for="s in subgroupsForGroup" :key="s.id" :value="s.id">{{ s.name }}</option>
                                     </select>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                                 </div>
+                                <span v-if="fieldErrors.itemSubgroupId" class="field-err">Required</span>
                             </div>
                             <div class="field" style="grid-column: span 2">
                                 <label class="nso-check"><input type="checkbox" v-model="form.isDefault"/> Make this the default option — new request lines pre-fill with it</label>
@@ -173,9 +185,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 
                     <section class="skum-sec">
                         <div class="skum-sec-h">
-                            <span class="skum-sec-t">Service options in this bundle</span>
+                            <span class="skum-sec-t">Service options in this bundle <span class="field-req">*</span></span>
                             <span class="skum-sec-help">{{ form.itemIds.length }} selected</span>
                         </div>
+                        <span v-if="fieldErrors.items" class="field-err">Select at least one service option</span>
 
                         <div v-if="selectedItems.length" class="bnd-chips">
                             <span v-for="i in selectedItems" :key="i.dbId" class="bnd-chip">
@@ -191,7 +204,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <input v-model="q" placeholder="Search service options by name, code or supplier…"/>
                         </div>
 
-                        <div class="bnd-pick-list">
+                        <div class="bnd-pick-list" :class="{ 'bnd-pick-list-bad': fieldErrors.items }">
                             <label v-for="i in pickable" :key="i.dbId" class="bnd-pick-row" :class="{ 'bnd-pick-row-on': isSelected(i.dbId) }">
                                 <input type="checkbox" :checked="isSelected(i.dbId)" @change="toggleItem(i.dbId)"/>
                                 <div class="bnd-pick-body">
@@ -214,75 +227,27 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             <span v-else>Assigning this bundle to a request item applies every service option above to that item.</span>
                         </div>
                     </section>
-                </div>
 
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
-                        <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to {{ editOption ? 'save' : 'add' }}</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Name and at least one service option are required</span>
-                    </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="close">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="addOption">{{ saving ? (editOption ? 'Saving…' : 'Adding…') : (editOption ? 'Save changes' : 'Add bundle') }}</button>
-                    </div>
-                </footer>
-            </div>
-        </div>
-    </Teleport>
+        <template #footer-left>
+            <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
+            <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to {{ editOption ? 'save' : 'add' }}</span>
+            <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Name, at least one service option, group &amp; subgroup are required</span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :loading="saving"
+                :text="editOption ? 'Save changes' : 'Add bundle'"
+                :loading-text="editOption ? 'Saving…' : 'Adding…'"
+                @click="addOption"
+            />
+        </template>
+    </FormModal>
 </template>
 
 <style scoped>
-.mp-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 12px; border-radius: 6px;
-    border: 1px solid #e8e4db; background: #fff;
-    font-size: 12.5px; font-weight: 500; color: #1a1614; cursor: pointer; transition: background .12s, border-color .12s;
-}
-.mp-btn:hover { background: #fbfaf6; border-color: #3d3833; }
-.mp-btn:disabled { opacity: .4; cursor: not-allowed; }
-.mp-btn-primary { background: #1a1614; border-color: #1a1614; color: #fff; }
-.mp-btn-primary:hover { background: #0a0806; border-color: #0a0806; }
-
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
 
-/* ── Modal shell (shares Add-SKU modal shell) ─────────────────────────────── */
-@keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
-}
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 680px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
-}
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
-}
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
-}
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px; transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 66vh; }
 .skum-sec { padding: 20px 0; border-bottom: 1px solid #efece4; }
 .skum-sec:last-child { border-bottom: none; }
 .skum-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
@@ -292,11 +257,15 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-lbl { font-size: 11.5px; font-weight: 600; color: #3d3833; }
+.field-req { color: #b91c1c; font-weight: 700; }
+.field-err { font-size: 11px; color: #b91c1c; font-weight: 500; }
 .field input, .field textarea {
     border: 1px solid #e8e4db; border-radius: 7px; padding: 8px 11px;
     font-size: 13px; color: #1a1614; background: #fff; outline: none; transition: border-color .12s;
 }
 .field input:focus, .field textarea:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.field input.field-bad { border-color: #dc2626; }
+.field input.field-bad:focus { box-shadow: 0 0 0 3px rgba(220,38,38,.1); }
 .sel { position: relative; display: flex; align-items: center; }
 .sel select {
     width: 100%; appearance: none; border: 1px solid #e8e4db; border-radius: 7px;
@@ -305,6 +274,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 }
 .sel select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
 .sel svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
+.sel-bad select { border-color: #dc2626; }
+.sel-bad select:focus { box-shadow: 0 0 0 3px rgba(220,38,38,.12); }
 .nso-check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #3d3833; cursor: pointer; }
 .nso-check input { accent-color: #0f766e; }
 
@@ -327,6 +298,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 }
 .bnd-search input { border: 0; outline: none; background: transparent; flex: 1; font-size: 12.5px; color: #1a1614; }
 .bnd-pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.bnd-pick-list-bad { border: 1px solid #dc2626; border-radius: 8px; padding: 6px; }
 .bnd-pick-row {
     display: flex; align-items: center; gap: 10px;
     border: 1px solid #e8e4db; border-radius: 7px; padding: 9px 11px; cursor: pointer; transition: background .12s, border-color .12s;
@@ -345,13 +317,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .nco-imp-l { font-size: 11px; color: #76706a; text-transform: uppercase; letter-spacing: .05em; }
 .nco-route { margin-top: 12px; font-size: 12px; color: #76706a; line-height: 1.5; background: #fbfaf6; border-radius: 6px; padding: 8px 10px; }
 
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px; border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
 .skum-ft-ok, .skum-ft-warn { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .skum-ft-ok   { color: #16a34a; }
 .skum-ft-warn { color: #b45309; }

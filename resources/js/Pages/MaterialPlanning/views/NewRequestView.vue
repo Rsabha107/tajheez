@@ -110,7 +110,7 @@ onMounted(() => {
         return;
     }
     if (!props.prefillSku) return;
-    const item = props.catalog.find(c => c.sku === props.prefillSku);
+    const item = eventCatalog.value.find(c => c.sku === props.prefillSku);
     if (!item) return;
     formLines.value = [{ id: nextLineId++, backendId: null, domain: item.domain, group: item.group, sub: item.sub, sku: item.sku, qty: 1, comment: '' }];
 });
@@ -125,7 +125,14 @@ function avatarColor(initials) {
 }
 function personOf(ini) { return (props.people || []).find(p => p.initials === ini) || props.people?.[0] || { name: ini }; }
 
-const spacesForArea = computed(() => props.spaces.filter(s => s.area === form.value.area));
+// Areas/spaces are event-scoped — only offer the active event's own areas
+// and spaces (existing draft lines still resolve via the full `areas`/
+// `spaces` props in loadDraft(), since a loaded draft's picks were fixed at
+// creation and may belong to a different event's now-superseded rows).
+const eventAreas = computed(() => props.event?.id ? props.areas.filter(a => a.eventId === props.event.id) : props.areas);
+const eventSpaces = computed(() => props.event?.id ? props.spaces.filter(s => s.eventId === props.event.id) : props.spaces);
+
+const spacesForArea = computed(() => eventSpaces.value.filter(s => s.area === form.value.area));
 
 function onAreaChange() {
     if (!spacesForArea.value.some(s => s.code === form.value.space)) {
@@ -133,21 +140,33 @@ function onAreaChange() {
     }
 }
 function onSpaceChange() {
-    const sp = props.spaces.find(s => s.code === form.value.space);
+    const sp = eventSpaces.value.find(s => s.code === form.value.space);
     if (sp) {
         form.value.lsName = sp.name;
         form.value.lsCode = sp.code;
     }
 }
 
+// Catalog items are event-scoped — only offer the active event's items when
+// picking a new line (existing lines still resolve via the full `catalog`
+// prop in lineItem(), since a loaded draft's items were fixed at creation).
+const eventCatalog = computed(() =>
+    props.event?.id ? props.catalog.filter(c => c.eventId === props.event.id) : props.catalog
+);
+
+// Venue picker is scoped to whichever venues are attached to the active
+// event; an event with none attached falls back to every venue.
+const eventVenues = computed(() =>
+    props.event?.venueIds?.length ? props.venues.filter(v => props.event.venueIds.includes(v.id)) : props.venues
+);
 function catalogGroupsFor(domain) {
-    return [...new Set(props.catalog.filter(c => c.domain === domain).map(c => c.group))];
+    return [...new Set(eventCatalog.value.filter(c => c.domain === domain).map(c => c.group))];
 }
 function catalogSubsFor(domain, group) {
-    return [...new Set(props.catalog.filter(c => c.domain === domain && c.group === group).map(c => c.sub))];
+    return [...new Set(eventCatalog.value.filter(c => c.domain === domain && c.group === group).map(c => c.sub))];
 }
 function catalogItemsFor(domain, group, sub) {
-    return props.catalog.filter(c => c.domain === domain && c.group === group && c.sub === sub);
+    return eventCatalog.value.filter(c => c.domain === domain && c.group === group && c.sub === sub);
 }
 function lineItem(line) {
     return props.catalog.find(c => c.sku === line.sku);
@@ -213,12 +232,25 @@ const lastSavedAt = ref(null);
 
 const canSave = computed(() => !!props.event?.id);
 
+// Only surfaced once the user tries to save with something missing, so the
+// form doesn't open already covered in red.
+const attemptedSave = ref(false);
+const formFieldErrors = computed(() => ({
+    venue: attemptedSave.value && !form.value.venue,
+    functionalArea: attemptedSave.value && props.functionalAreas.length > 0 && !form.value.functionalArea,
+    items: attemptedSave.value && !formLines.value.some(l => l.sku),
+}));
+
 async function persist(shouldSubmit) {
     if (saving.value || !canSave.value) return;
+    if (!form.value.venue || (props.functionalAreas.length && !form.value.functionalArea) || !formLines.value.some(l => l.sku)) {
+        attemptedSave.value = true;
+    }
     if (!form.value.venue) { error.value = 'Select a venue.'; return; }
     if (props.functionalAreas.length && !form.value.functionalArea) { error.value = 'Select a functional area.'; return; }
     if (!formLines.value.some(l => l.sku)) { error.value = 'Add at least one item.'; return; }
 
+    attemptedSave.value = false;
     saving.value = true;
     error.value = null;
     try {
@@ -331,17 +363,19 @@ async function persist(shouldSubmit) {
             <div class="mp-form-grid">
                 <div class="mp-field">
                     <label>Venue <span class="mp-req">*</span></label>
-                    <select v-model="form.venue">
+                    <select v-model="form.venue" :class="{ 'mp-field-bad': formFieldErrors.venue }">
                         <option value="">— Venue —</option>
-                        <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} · {{ v.name }}</option>
+                        <option v-for="v in eventVenues" :key="v.id" :value="v.id">{{ v.code }} · {{ v.name }}</option>
                     </select>
+                    <span v-if="formFieldErrors.venue" class="mp-field-err">Required</span>
                 </div>
                 <div v-if="functionalAreas.length" class="mp-field">
                     <label>Functional Area <span class="mp-req">*</span></label>
-                    <select v-model="form.functionalArea">
+                    <select v-model="form.functionalArea" :class="{ 'mp-field-bad': formFieldErrors.functionalArea }">
                         <option value="">— Functional Area —</option>
                         <option v-for="fa in functionalAreas" :key="fa.id" :value="fa.id">{{ fa.title }}</option>
                     </select>
+                    <span v-if="formFieldErrors.functionalArea" class="mp-field-err">Required</span>
                 </div>
                 <div class="mp-field">
                     <label>Move-in</label>
@@ -365,7 +399,7 @@ async function persist(shouldSubmit) {
                     <label>Area</label>
                     <select v-model="form.area" @change="onAreaChange">
                         <option value="">— Area —</option>
-                        <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                        <option v-for="a in eventAreas" :key="a.id" :value="a.id">{{ a.label }}</option>
                     </select>
                 </div>
                 <div class="mp-field">
@@ -420,6 +454,7 @@ async function persist(shouldSubmit) {
                     <template v-if="showItemValues"> · estimated <b class="mono">{{ fmtMoney(formTotal) }}</b></template>
                 </div>
             </div>
+            <div v-if="formFieldErrors.items" class="mp-field-err mp-field-err-block">At least one item is required</div>
             <div class="mp-ir-head" :class="{ 'mp-ir-no-value': !showItemValues }">
                 <div>Domain</div><div>Group</div><div>Sub-group</div><div>Item</div>
                 <div class="ta-r">Qty</div><div v-if="showItemValues" class="ta-r">Line total</div><div>Comment</div><div></div>
@@ -583,6 +618,14 @@ async function persist(shouldSubmit) {
 .mp-field input:focus, .mp-field select:focus, .mp-field textarea:focus {
     border-color: #0f766e; box-shadow: 0 0 0 3px #0f766e1c;
 }
+.mp-field input.mp-field-bad, .mp-field select.mp-field-bad, .mp-field textarea.mp-field-bad {
+    border-color: #dc2626;
+}
+.mp-field input.mp-field-bad:focus, .mp-field select.mp-field-bad:focus, .mp-field textarea.mp-field-bad:focus {
+    box-shadow: 0 0 0 3px rgba(220,38,38,.12);
+}
+.mp-field-err { font-size: 11px; color: #b91c1c; font-weight: 500; }
+.mp-field-err-block { margin: -6px 0 10px 4px; }
 .mp-field textarea { resize: vertical; min-height: 64px; font-family: inherit; }
 .mp-span-2 { grid-column: span 2; }
 

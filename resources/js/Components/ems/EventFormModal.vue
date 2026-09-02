@@ -2,6 +2,9 @@
 import { ref, watch, computed } from "vue";
 import axios from "axios";
 import { useForm } from "@inertiajs/vue3";
+import ProgressButton from "@/Pages/MaterialPlanning/components/ProgressButton.vue";
+import DateField from "@/Pages/MaterialPlanning/components/DateField.vue";
+import FormModal from "@/Pages/MaterialPlanning/components/FormModal.vue";
 
 import vueFilePond from "vue-filepond/dist/vue-filepond.esm.js";
 import FilePondPluginImagePreview from "filepond-plugin-image-preview";
@@ -43,6 +46,9 @@ const isEdit = computed(() => props.mode === "edit");
 const form = useForm({
   id:          null,
   name:        "",
+  code:        "",
+  start_date:  "",
+  end_date:    "",
   active_flag: "",
   logo:        null,
   venue_ids:   [],
@@ -87,6 +93,9 @@ watch(
     form.reset();
     form.id          = props.event?.id ?? null;
     form.name        = props.event?.name ?? "";
+    form.code        = props.event?.code ?? "";
+    form.start_date  = props.event?.start_date ?? "";
+    form.end_date    = props.event?.end_date ?? "";
     form.active_flag = props.event?.active_flag ? Number(props.event.active_flag) : "";
     form.logo        = null;
     form.venue_ids   = props.event?.venue_ids ?? [];
@@ -130,21 +139,17 @@ function submit() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="ev-modal-overlay" @click.self="closeModal">
-      <div class="ev-modal-box">
-        <!-- Header -->
-        <div class="ev-modal-header">
-          <h5 class="ev-modal-title">
-            <i class="fa fa-calendar-alt me-2 text-primary"></i>
-            {{ isEdit ? "Edit Event" : "Add Event" }}
-          </h5>
-          <button class="btn-close" @click="closeModal"></button>
-        </div>
+  <FormModal
+    :show="show"
+    :title="isEdit ? 'Edit Event' : 'Add Event'"
+    :subtitle="isEdit ? 'Update this event\'s schedule, code, status and venues.' : 'Register a new event — code and dates are optional and can be added later.'"
+    @close="closeModal"
+  >
+    <template #eyebrow>
+      <span>Events</span>
+    </template>
 
-        <!-- Body -->
-        <div class="ev-modal-body">
-          <form id="event-form" @submit.prevent="submit">
+          <form id="event-form" class="ev-form" @submit.prevent="submit">
             <!-- Logo -->
             <div class="mb-3">
               <label class="form-label fw-semibold">Event Logo</label>
@@ -164,18 +169,61 @@ function submit() {
               </div>
             </div>
 
-            <!-- Name -->
-            <div class="mb-3">
-              <label class="form-label fw-semibold">Event Name</label>
-              <input
-                v-model="form.name"
-                type="text"
-                class="form-control"
-                :class="{ 'is-invalid': form.errors.name }"
-                placeholder="Enter event name"
-              />
-              <div v-if="form.errors.name" class="invalid-feedback">
-                {{ form.errors.name }}
+            <!-- Name & Code -->
+            <div class="row mb-3">
+              <div class="col-8">
+                <label class="form-label fw-semibold">Event Name</label>
+                <input
+                  v-model="form.name"
+                  type="text"
+                  class="form-control"
+                  :class="{ 'is-invalid': form.errors.name }"
+                  placeholder="Enter event name"
+                />
+                <div v-if="form.errors.name" class="invalid-feedback">
+                  {{ form.errors.name }}
+                </div>
+              </div>
+              <div class="col-4">
+                <label class="form-label fw-semibold">
+                  Code <span class="text-muted fw-normal">(optional)</span>
+                </label>
+                <input
+                  v-model="form.code"
+                  type="text"
+                  class="form-control"
+                  :class="{ 'is-invalid': form.errors.code }"
+                  placeholder="e.g. FIC25"
+                />
+                <div v-if="form.errors.code" class="invalid-feedback">
+                  {{ form.errors.code }}
+                </div>
+              </div>
+            </div>
+
+            <!-- Dates -->
+            <div class="row mb-3">
+              <div class="col-6">
+                <label class="form-label fw-semibold">Start Date</label>
+                <DateField
+                  v-model="form.start_date"
+                  :invalid="!!form.errors.start_date"
+                  :class="{ 'is-invalid': form.errors.start_date }"
+                />
+                <div v-if="form.errors.start_date" class="invalid-feedback">
+                  {{ form.errors.start_date }}
+                </div>
+              </div>
+              <div class="col-6">
+                <label class="form-label fw-semibold">End Date</label>
+                <DateField
+                  v-model="form.end_date"
+                  :invalid="!!form.errors.end_date"
+                  :class="{ 'is-invalid': form.errors.end_date }"
+                />
+                <div v-if="form.errors.end_date" class="invalid-feedback">
+                  {{ form.errors.end_date }}
+                </div>
               </div>
             </div>
 
@@ -204,13 +252,12 @@ function submit() {
                   Venues
                   <span class="ev-badge-count">{{ form.venue_ids.length }} selected</span>
                 </label>
-                <button
-                  type="button"
+                <ProgressButton
+                  variant="bootstrap"
                   class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+                  text="Clear all"
                   @click="form.venue_ids = []"
-                >
-                  Clear all
-                </button>
+                />
               </div>
               <input
                 v-model="venueSearch"
@@ -242,83 +289,24 @@ function submit() {
               </div>
             </div>
           </form>
-        </div>
 
-        <!-- Footer -->
-        <div class="ev-modal-footer">
-          <button type="button" class="btn btn-light" @click="closeModal">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="event-form"
-            class="btn btn-primary"
-            :disabled="form.processing"
-          >
-            <span
-              v-if="form.processing"
-              class="spinner-border spinner-border-sm me-1"
-            ></span>
-            {{ form.processing ? "Saving..." : isEdit ? "Update" : "Save" }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+    <template #footer-actions>
+      <ProgressButton
+        variant="primary"
+        color="#0f766e"
+        hover-color="#0d9488"
+        type="submit"
+        form="event-form"
+        :loading="form.processing"
+        :text="isEdit ? 'Update' : 'Save'"
+        loading-text="Saving..."
+      />
+    </template>
+  </FormModal>
 </template>
 
 <style scoped>
-.ev-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1050;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.ev-modal-box {
-  background: #fff;
-  border-radius: 18px;
-  width: 480px;
-  max-width: 95vw;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
-}
-
-.ev-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid #eaecf6;
-  flex-shrink: 0;
-}
-
-.ev-modal-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.ev-modal-body {
-  padding: 1.25rem;
-  overflow-y: auto;
-  flex: 1 1 auto;
-}
-
-.ev-modal-footer {
-  padding: 1rem 1.25rem;
-  border-top: 1px solid #eaecf6;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
+.ev-form { padding: 20px 0; }
 
 /* Venue picker */
 .ev-badge-count {

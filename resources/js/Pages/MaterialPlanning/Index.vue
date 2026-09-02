@@ -78,7 +78,7 @@ const activeEvent = computed(() => {
     const found = availableEvents.value.find(e => e.id === selectedEventId.value);
     if (!found) return props.event;
     if (found.id === props.event?.id) return props.event;
-    return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null };
+    return { id: found.id, code: eventCode(found), name: found.name, window: null, daysOut: null, venueIds: found.venue_ids ?? [] };
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────
@@ -181,6 +181,13 @@ const requestsRefreshing = ref(false);
 function refreshRequests() {
     requestsRefreshing.value = true;
     router.reload({ only: ['requests', 'requestLines'], onFinish: () => { requestsRefreshing.value = false; } });
+}
+
+// User clicked the refresh icon in ServiceOptionsView — refresh in place.
+const serviceOptionsRefreshing = ref(false);
+function refreshServiceOptions() {
+    serviceOptionsRefreshing.value = true;
+    router.reload({ only: ['serviceOptions', 'serviceOptionItems', 'suppliers'], onFinish: () => { serviceOptionsRefreshing.value = false; } });
 }
 
 // ── User menu ──────────────────────────────────────────────────────────────
@@ -627,6 +634,8 @@ onMounted(async () => {
                     :item-subgroups="itemSubgroups"
                     :permissions="permissions"
                     :event="activeEvent"
+                    :refreshing="serviceOptionsRefreshing"
+                    @refresh="refreshServiceOptions"
                 />
 
                 <SupplierView
@@ -730,6 +739,7 @@ onMounted(async () => {
                     :classifications="classifications"
                     :permissions="permissions"
                     :show-item-values="showItemValues"
+                    :event="activeEvent"
                     @go-to="goTo"
                     @refresh-detail="() => openRequest(detailId)"
                 />

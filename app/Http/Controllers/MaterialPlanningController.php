@@ -129,10 +129,14 @@ class MaterialPlanningController extends Controller
             'event' => $event ? [
                 'id' => $event->id,
                 'name' => $event->name,
+                'code' => $event->code,
                 'window' => ($event->start_date && $event->end_date)
                     ? $event->start_date->format('M j') . ' – ' . $event->end_date->format('M j, Y')
                     : null,
                 'daysOut' => $event->start_date ? max(0, (int) round(now()->diffInDays($event->start_date, false))) : null,
+                // Scopes the Venue picker/filters to venues actually attached to
+                // this event; the frontend falls back to every venue when empty.
+                'venueIds' => $event->venues()->pluck('venues.id')->all(),
             ] : null,
 
             'venues' => Venue::orderBy('title')->get()->map(fn (Venue $v) => [
@@ -146,6 +150,7 @@ class MaterialPlanningController extends Controller
             'domains' => $domains->map(fn (Domain $d) => [
                 'id' => $d->id,
                 'code' => $d->code,
+                'eventId' => $d->event_id,
                 'label' => $d->label,
                 'color' => $d->color,
                 'chip' => $d->chip,
@@ -160,6 +165,7 @@ class MaterialPlanningController extends Controller
             'areas' => $areas->map(fn (Area $a) => [
                 'id' => $a->id,
                 'code' => $a->code,
+                'eventId' => $a->event_id,
                 'label' => $a->label,
                 'description' => $a->description,
                 'sortOrder' => $a->sort_order,
@@ -172,6 +178,7 @@ class MaterialPlanningController extends Controller
             'spaces' => $spaces->map(fn (Space $s) => [
                 'id' => $s->id,
                 'code' => $s->code,
+                'eventId' => $s->event_id,
                 'name' => $s->name,
                 'description' => $s->description,
                 'area' => $s->area_id,
@@ -184,6 +191,7 @@ class MaterialPlanningController extends Controller
             'itemGroups' => $itemGroups->map(fn (ItemGroup $g) => [
                 'id' => $g->id,
                 'code' => $g->code,
+                'eventId' => $g->event_id,
                 'domain' => $g->domain_id,
                 'domainLabel' => $g->domain?->label,
                 'label' => $g->label,
@@ -198,6 +206,7 @@ class MaterialPlanningController extends Controller
             'itemSubgroups' => $itemSubgroups->map(fn (ItemSubgroup $s) => [
                 'id' => $s->id,
                 'code' => $s->code,
+                'eventId' => $s->event_id,
                 'name' => $s->name,
                 'description' => $s->description,
                 'group' => $s->group_id,
@@ -263,7 +272,7 @@ class MaterialPlanningController extends Controller
                 'id' => $l->id,
                 'requestId' => $r->code,
                 'requestTitle' => $r->title,
-                'eventId' => $r->event_id,
+                'eventId' => $l->event_id,
                 'status' => $r->status,
                 'sku' => $l->sku,
                 'name' => $l->catalogItem?->name,
@@ -294,6 +303,7 @@ class MaterialPlanningController extends Controller
                 'sku' => $c->sku,
                 'dbId' => $c->id,
                 'domain' => $c->domain_code,
+                'eventId' => $c->event_id,
                 'group' => $c->group,
                 'sub' => $c->sub,
                 'name' => $c->name,
@@ -328,6 +338,7 @@ class MaterialPlanningController extends Controller
                 // everywhere else in the UI, but assigning a line to an option
                 // needs the actual FK value (mp_request_lines.service_option_id).
                 'dbId' => $o->id,
+                'eventId' => $o->event_id,
                 'name' => $o->name,
                 'cost' => (float) $o->services->sum('cost'),
                 'lead' => (int) $o->services->max('lead_days'),
@@ -360,6 +371,7 @@ class MaterialPlanningController extends Controller
             'serviceOptionItems' => $serviceOptionItems->map(fn (ServiceOptionItem $i) => [
                 'id' => $i->code,
                 'dbId' => $i->id,
+                'eventId' => $i->event_id,
                 'name' => $i->name,
                 'supplierCode' => $i->supplier_code,
                 'supplierName' => $i->supplier?->name,

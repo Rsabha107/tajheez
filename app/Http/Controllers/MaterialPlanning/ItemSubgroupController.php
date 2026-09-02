@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\ItemSubgroup;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class ItemSubgroupController extends Controller
 {
@@ -22,7 +23,8 @@ class ItemSubgroupController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'max:20', 'unique:mp_item_subgroups,code'],
-            'group_id' => ['required', 'exists:mp_item_groups,id'],
+            'event_id' => ['required', 'exists:events,id'],
+            'group_id' => ['required', Rule::exists('mp_item_groups', 'id')->where('event_id', $request->input('event_id'))],
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:255'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
@@ -38,8 +40,11 @@ class ItemSubgroupController extends Controller
     {
         Gate::authorize('update', $itemSubgroup);
 
+        $eventId = $request->input('event_id', $itemSubgroup->event_id);
+
         $data = $request->validate([
-            'group_id' => ['sometimes', 'exists:mp_item_groups,id'],
+            'event_id' => ['sometimes', 'exists:events,id'],
+            'group_id' => ['sometimes', Rule::exists('mp_item_groups', 'id')->where('event_id', $eventId)],
             'name' => ['sometimes', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:255'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
@@ -64,6 +69,7 @@ class ItemSubgroupController extends Controller
         return [
             'id' => $itemSubgroup->id,
             'code' => $itemSubgroup->code,
+            'eventId' => $itemSubgroup->event_id,
             'name' => $itemSubgroup->name,
             'description' => $itemSubgroup->description,
             'group' => $itemSubgroup->group_id,

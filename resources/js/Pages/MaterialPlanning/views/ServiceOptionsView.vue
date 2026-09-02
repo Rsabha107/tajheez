@@ -5,6 +5,7 @@ import NewBundleModal from '../components/NewBundleModal.vue';
 import NewServiceOptionItemModal from '../components/NewServiceOptionItemModal.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import FilterPanel from '../components/FilterPanel.vue';
+import RefreshButton from '../components/RefreshButton.vue';
 
 const props = defineProps({
     suppliers:       Array,
@@ -15,7 +16,10 @@ const props = defineProps({
     itemSubgroups:   { type: Array, default: () => [] },
     permissions:     { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     event:           { type: Object, default: () => ({ code: 'EVT' }) },
+    refreshing:      { type: Boolean, default: false },
 });
+
+const emit = defineEmits(['refresh']);
 
 const activeTab = ref('options'); // 'options' = reusable library, 'bundles' = groups of options
 
@@ -43,7 +47,19 @@ const fClassification = ref('all');
 const fGroup           = ref('all');
 const q               = ref('');
 
-const all = computed(() => optionsList.value.map(o => ({ ...o, services: o.services || [] })));
+// Bundles are now event-scoped — narrow to the active event, same pattern as
+// eventItems/eventChangeOrders elsewhere in the module.
+const eventOptions = computed(() =>
+    props.event?.id ? optionsList.value.filter(o => o.eventId === props.event.id) : optionsList.value
+);
+const eventItemGroups = computed(() =>
+    props.event?.id ? props.itemGroups.filter(g => g.eventId === props.event.id) : props.itemGroups
+);
+const eventItemSubgroups = computed(() =>
+    props.event?.id ? props.itemSubgroups.filter(s => s.eventId === props.event.id) : props.itemSubgroups
+);
+
+const all = computed(() => eventOptions.value.map(o => ({ ...o, services: o.services || [] })));
 
 const rows = computed(() => {
     let r = all.value.slice();
@@ -75,33 +91,27 @@ const noContractCount = computed(() =>
     ).length, 0)
 );
 
-// A bundle's services can each have a different supplier, so a supplier's rollup
-// counts bundles it appears in at all, but averages lead only over its own service rows.
-const suppliersRollup = computed(() =>
-    props.suppliers.map(s => {
-        const myServices = all.value.flatMap(o => o.services.filter(svc => svc.supplier === s.code));
-        const bundleCount = all.value.filter(o => o.services.some(svc => svc.supplier === s.code)).length;
-        const lead = myServices.length ? Math.round(myServices.reduce((a, svc) => a + svc.lead, 0) / myServices.length) : 0;
-        return { ...s, count: bundleCount, lead };
-    })
-);
-
 function clearBundleFilters() { fSupplier.value = 'all'; fClassification.value = 'all'; fGroup.value = 'all'; q.value = ''; }
 const bundleActiveFilterChips = computed(() => {
     const chips = [];
     if (fSupplier.value !== 'all') chips.push({ key: 'supplier', label: `Supplier: ${supplierOf(fSupplier.value)?.name ?? fSupplier.value}`, remove: () => { fSupplier.value = 'all'; } });
     if (fClassification.value !== 'all') chips.push({ key: 'classification', label: `Classification: ${props.classifications.find(c => c.id === fClassification.value)?.name ?? fClassification.value}`, remove: () => { fClassification.value = 'all'; } });
-    if (fGroup.value !== 'all') chips.push({ key: 'group', label: `Group: ${props.itemGroups.find(g => g.id === fGroup.value)?.label ?? fGroup.value}`, remove: () => { fGroup.value = 'all'; } });
+    if (fGroup.value !== 'all') chips.push({ key: 'group', label: `Group: ${eventItemGroups.value.find(g => g.id === fGroup.value)?.label ?? fGroup.value}`, remove: () => { fGroup.value = 'all'; } });
     return chips;
 });
 
 // ── Service options (reusable library): filters + derived ───────────────────
+// The library is now event-scoped too, same as bundles — narrow to the active event.
+const eventItemsList = computed(() =>
+    props.event?.id ? itemsList.value.filter(i => i.eventId === props.event.id) : itemsList.value
+);
+
 const iSupplier = ref('all');
 const iGroup    = ref('all');
 const iq        = ref('');
 
 const itemRows = computed(() => {
-    let r = itemsList.value.slice();
+    let r = eventItemsList.value.slice();
     if (iSupplier.value !== 'all') r = r.filter(i => i.supplierCode === iSupplier.value);
     if (iGroup.value !== 'all') r = r.filter(i => i.itemGroupId === iGroup.value);
     if (iq.value) {
@@ -116,13 +126,13 @@ const itemRows = computed(() => {
     return r;
 });
 
-const usedItemCount = computed(() => itemsList.value.filter(i => i.usageCount > 0).length);
+const usedItemCount = computed(() => eventItemsList.value.filter(i => i.usageCount > 0).length);
 
 function clearItemFilters() { iSupplier.value = 'all'; iGroup.value = 'all'; iq.value = ''; }
 const itemActiveFilterChips = computed(() => {
     const chips = [];
     if (iSupplier.value !== 'all') chips.push({ key: 'supplier', label: `Supplier: ${supplierOf(iSupplier.value)?.name ?? iSupplier.value}`, remove: () => { iSupplier.value = 'all'; } });
-    if (iGroup.value !== 'all') chips.push({ key: 'group', label: `Group: ${props.itemGroups.find(g => g.id === iGroup.value)?.label ?? iGroup.value}`, remove: () => { iGroup.value = 'all'; } });
+    if (iGroup.value !== 'all') chips.push({ key: 'group', label: `Group: ${eventItemGroups.value.find(g => g.id === iGroup.value)?.label ?? iGroup.value}`, remove: () => { iGroup.value = 'all'; } });
     return chips;
 });
 
@@ -214,9 +224,10 @@ async function confirmDeleteItemFn() {
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Service options</h1>
-                <p class="mp-page-sub">{{ itemsList.length }} reusable service options · {{ all.length }} bundles · {{ suppliers.length }} suppliers · a bundle can group one or many service options</p>
+                <p class="mp-page-sub">{{ eventItemsList.length }} reusable service options · {{ all.length }} bundles · {{ suppliers.length }} suppliers · a bundle can group one or many service options</p>
             </div>
             <div class="mp-head-actions">
+                <RefreshButton :refreshing="refreshing" title="Refresh table" @click="emit('refresh')"/>
                 <button class="mp-btn">Export</button>
                 <button v-if="activeTab === 'options'" class="mp-btn mp-btn-primary" @click="openAddItem">+ New service option</button>
                 <button v-else class="mp-btn mp-btn-primary" @click="openAddBundle">+ New bundle</button>
@@ -224,7 +235,7 @@ async function confirmDeleteItemFn() {
         </div>
 
         <div class="mp-tabs">
-            <button class="mp-tab" :class="{ 'mp-tab-on': activeTab === 'options' }" @click="activeTab = 'options'">Service Options · {{ itemsList.length }}</button>
+            <button class="mp-tab" :class="{ 'mp-tab-on': activeTab === 'options' }" @click="activeTab = 'options'">Service Options · {{ eventItemsList.length }}</button>
             <button class="mp-tab" :class="{ 'mp-tab-on': activeTab === 'bundles' }" @click="activeTab = 'bundles'">Bundles · {{ all.length }}</button>
         </div>
 
@@ -233,7 +244,7 @@ async function confirmDeleteItemFn() {
             <div class="opt-strip">
                 <div class="cox-kpi">
                     <div class="cox-kpi-l">Reusable service options</div>
-                    <div class="cox-kpi-v mono">{{ itemsList.length }}</div>
+                    <div class="cox-kpi-v mono">{{ eventItemsList.length }}</div>
                     <div class="cox-kpi-s">the library any bundle can pick from</div>
                 </div>
                 <div class="cox-kpi">
@@ -243,7 +254,7 @@ async function confirmDeleteItemFn() {
                 </div>
                 <div class="cox-kpi">
                     <div class="cox-kpi-l">Unused</div>
-                    <div class="cox-kpi-v mono">{{ itemsList.length - usedItemCount }}</div>
+                    <div class="cox-kpi-v mono">{{ eventItemsList.length - usedItemCount }}</div>
                     <div class="cox-kpi-s">not yet added to any bundle</div>
                 </div>
             </div>
@@ -266,7 +277,7 @@ async function confirmDeleteItemFn() {
                             <label>Item group</label>
                             <select v-model="iGroup">
                                 <option value="all">All groups</option>
-                                <option v-for="g in itemGroups" :key="g.id" :value="g.id">{{ g.label }}</option>
+                                <option v-for="g in eventItemGroups" :key="g.id" :value="g.id">{{ g.label }}</option>
                             </select>
                         </div>
                     </div>
@@ -301,7 +312,7 @@ async function confirmDeleteItemFn() {
                     <tbody>
                         <tr v-for="i in itemRows" :key="i.dbId" :class="{ 'cat-row-new': justAddedItem === i.id }">
                             <td class="mono">{{ i.id }}</td>
-                            <td class="opt-name">{{ i.name }}</td>
+                            <td class="opt-item-name">{{ i.name }}</td>
                             <td>
                                 <span v-if="i.itemGroupLabel">{{ i.itemGroupLabel }}</span>
                                 <span v-else class="mp-muted">—</span>
@@ -326,7 +337,7 @@ async function confirmDeleteItemFn() {
                     </tbody>
                 </table>
             </div>
-            <div class="dt-foot">Showing <b>{{ itemRows.length }}</b> of {{ itemsList.length }} service options</div>
+            <div class="dt-foot">Showing <b>{{ itemRows.length }}</b> of {{ eventItemsList.length }} service options</div>
         </template>
 
         <!-- ══════════════════════════════ Bundles tab ═══════════════════════════════ -->
@@ -381,7 +392,7 @@ async function confirmDeleteItemFn() {
                             <label>Item group</label>
                             <select v-model="fGroup">
                                 <option value="all">All groups</option>
-                                <option v-for="g in itemGroups" :key="g.id" :value="g.id">{{ g.label }}</option>
+                                <option v-for="g in eventItemGroups" :key="g.id" :value="g.id">{{ g.label }}</option>
                             </select>
                         </div>
                     </div>
@@ -447,29 +458,6 @@ async function confirmDeleteItemFn() {
                 </table>
             </div>
             <div class="dt-foot">Showing <b>{{ rows.length }}</b> of {{ all.length }} bundles</div>
-
-            <!-- Suppliers card -->
-            <div class="mp-card">
-                <div class="mp-card-head">
-                    <h3 class="mp-card-title">Suppliers</h3>
-                    <div class="mp-card-sub">Framework agreements in force for {{ event.code }}</div>
-                </div>
-                <ul class="opt-suplist">
-                    <li v-for="s in suppliersRollup" :key="s.id" class="opt-suprow" :class="{ 'opt-suprow-off': s.classificationName === 'Suspended' }">
-                        <div class="opt-suprow-l">
-                            <div class="opt-sup">{{ s.name }}</div>
-                            <div class="opt-sup-sub">{{ s.kind }} · <span class="mono">{{ s.msa }}</span></div>
-                        </div>
-                        <div class="opt-supstat mono">{{ s.count }} bundle{{ s.count === 1 ? '' : 's' }}</div>
-                        <div class="opt-supstat mono">{{ s.lead ? s.lead + ' d avg lead' : '—' }}</div>
-                        <div class="opt-supown">
-                            {{ s.contactName || '—' }}
-                            <span v-if="s.contactPhone" class="opt-supown-phone mono">{{ s.contactPhone }}</span>
-                        </div>
-                        <span class="opt-status" :style="{ background: colorMeta(s.classificationColor).bg, color: colorMeta(s.classificationColor).fg }">{{ s.classificationName || '—' }}</span>
-                    </li>
-                </ul>
-            </div>
         </template>
     </div>
 
@@ -477,8 +465,8 @@ async function confirmDeleteItemFn() {
     <NewServiceOptionItemModal
         v-if="showAddItem"
         :suppliers="suppliers"
-        :item-groups="itemGroups"
-        :item-subgroups="itemSubgroups"
+        :item-groups="eventItemGroups"
+        :item-subgroups="eventItemSubgroups"
         :edit-item="editItemTarget"
         :event="event"
         @close="closeItemModal"
@@ -488,10 +476,10 @@ async function confirmDeleteItemFn() {
     <!-- ── New / edit bundle modal ─────────────────────────────────────────────── -->
     <NewBundleModal
         v-if="showAddBundle"
-        :service-option-items="itemsList"
+        :service-option-items="eventItemsList"
         :classifications="classifications"
-        :item-groups="itemGroups"
-        :item-subgroups="itemSubgroups"
+        :item-groups="eventItemGroups"
+        :item-subgroups="eventItemSubgroups"
         :edit-option="editBundleTarget"
         :event="event"
         @close="closeBundleModal"
@@ -622,6 +610,7 @@ async function confirmDeleteItemFn() {
 .opt-table th.ta-c { text-align: center; }
 
 .opt-item-sub { font-size: 11px; color: #76706a; margin-top: 2px; }
+.opt-item-name { font-size: 13px; font-weight: 500; }
 .opt-name { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; }
 .opt-def {
     font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
@@ -629,8 +618,6 @@ async function confirmDeleteItemFn() {
 }
 .opt-svcs { display: flex; flex-wrap: wrap; gap: 5px; max-width: 340px; }
 .opt-svc-chip { font-size: 11px; color: #3d3833; background: #efece4; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
-.opt-sup { font-size: 13px; font-weight: 500; }
-.opt-sup-sub { font-size: 11px; color: #76706a; margin-top: 2px; }
 .opt-status {
     display: inline-flex; align-items: center; padding: 2px 8px;
     border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap;
@@ -654,19 +641,6 @@ async function confirmDeleteItemFn() {
 
 @keyframes cat-newrow { 0%, 100% { background: transparent; } 20% { background: rgba(15,118,110,.12); } }
 .cat-row-new td { animation: cat-newrow 2.4s ease; }
-
-/* ── Suppliers card ───────────────────────────────────────────────────────── */
-.opt-suplist { list-style: none; margin: 0; padding: 0; }
-.opt-suprow {
-    display: grid; grid-template-columns: 1.6fr 100px 120px 160px 90px;
-    align-items: center; gap: 12px; padding: 12px 0;
-    border-bottom: 1px solid #f3f0ea;
-}
-.opt-suprow:last-child { border-bottom: none; }
-.opt-suprow-off { opacity: .55; }
-.opt-supstat { font-size: 12.5px; color: #76706a; }
-.opt-supown { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: #1a1614; }
-.opt-supown-phone { font-size: 11px; color: #76706a; }
 
 .dt-foot { font-size: 12px; color: #76706a; text-align: right; margin: 8px 0 16px; }
 

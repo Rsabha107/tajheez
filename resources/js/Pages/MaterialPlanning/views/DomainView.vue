@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import FormModal from '../components/FormModal.vue';
+import ProgressButton from '../components/ProgressButton.vue';
 
 const props = defineProps({
     domains:     Array,
@@ -11,6 +13,7 @@ const props = defineProps({
 });
 
 const domainList = ref([...props.domains]);
+const eventDomains = computed(() => props.event?.id ? domainList.value.filter(d => d.eventId === props.event.id) : domainList.value);
 
 const STATUS_COLORS = {
     success: { bg: '#dcfce7', fg: '#166534' },
@@ -25,7 +28,7 @@ function defaultStatusId() { return props.statuses.find(s => s.name === 'active'
 
 const q = ref('');
 const rows = computed(() => {
-    let r = domainList.value.slice();
+    let r = eventDomains.value.slice();
     if (q.value) {
         const k = q.value.toLowerCase();
         r = r.filter(d => d.label.toLowerCase().includes(k) || d.code.toLowerCase().includes(k));
@@ -41,7 +44,7 @@ const justAdded = ref(null);
 const editingId = ref(null);
 
 function freshForm() {
-    return { code: '', label: '', color: '#1d4ed8', chip: '#dbeafe', description: '', sortOrder: domainList.value.length + 1, status: defaultStatusId() };
+    return { code: '', label: '', color: '#1d4ed8', chip: '#dbeafe', description: '', sortOrder: eventDomains.value.length + 1, status: defaultStatusId() };
 }
 const form = ref(freshForm());
 const formValid = computed(() => /^[A-Z0-9_]+$/.test(form.value.code) && form.value.label.trim() && form.value.color && form.value.chip);
@@ -81,6 +84,7 @@ async function submitDomain() {
         sort_order: +form.value.sortOrder || 0,
         status_id: form.value.status,
     };
+    if (!editingId.value) payload.event_id = props.event.id;
     try {
         if (editingId.value) {
             const { data } = await axios.put(route('mp.domains.update', editingId.value), payload);
@@ -106,14 +110,17 @@ async function submitDomain() {
 const confirmDeleteRow = ref(null);
 const deleting = ref(false);
 const deleteError = ref(null);
+const deleteUsage = ref(null); // { itemGroups: [...labels], catalogItems: [...skus] } when in use
 function askDelete(domain) {
     confirmDeleteRow.value = domain;
     deleteError.value = null;
+    deleteUsage.value = null;
 }
 async function confirmDelete() {
     if (!confirmDeleteRow.value) return;
     deleting.value = true;
     deleteError.value = null;
+    deleteUsage.value = null;
     try {
         await axios.delete(route('mp.domains.destroy', confirmDeleteRow.value.id));
         domainList.value = domainList.value.filter(d => d.id !== confirmDeleteRow.value.id);
@@ -121,15 +128,13 @@ async function confirmDelete() {
     } catch (e) {
         deleteError.value = e.response?.status === 403
             ? "You don't have permission to remove domains."
-            : 'Could not remove this domain — it may still have item groups assigned.';
+            : (e.response?.data?.message ?? 'Could not remove this domain.');
+        deleteUsage.value = e.response?.data?.usage ?? null;
     } finally {
         deleting.value = false;
     }
 }
 
-function onEsc(e) { if (e.key === 'Escape' && showAdd.value) closeAdd(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
@@ -137,7 +142,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Domains</h1>
-                <p class="mp-page-sub">{{ domainList.length }} material domains · top-level categories item groups belong to</p>
+                <p class="mp-page-sub">{{ eventDomains.length }} material domains · top-level categories item groups belong to</p>
             </div>
             <div class="mp-head-actions">
                 <button v-if="permissions.isAdmin" class="mp-btn mp-btn-primary" @click="openAdd">+ New domain</button>
@@ -185,25 +190,21 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 </tbody>
             </table>
         </div>
-        <div class="dt-foot">Showing <b>{{ rows.length }}</b> of {{ domainList.length }} domains</div>
+        <div class="dt-foot">Showing <b>{{ rows.length }}</b> of {{ eventDomains.length }} domains</div>
     </div>
 
     <!-- ── New domain modal ──────────────────────────────────────────────── -->
-    <Teleport to="body" v-if="showAdd">
-        <div class="skum-scrim" @click.self="closeAdd">
-            <div class="skum" role="dialog" aria-modal="true">
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Domains</span></div>
-                        <h2 class="skum-title">{{ editingId ? 'Edit domain' : 'New domain' }}</h2>
-                        <p class="skum-sub">A top-level material category (Overlay, Power, IT…) that item groups belong to.</p>
-                    </div>
-                    <button class="skum-x" @click="closeAdd" aria-label="Close">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
+    <FormModal
+        :show="showAdd"
+        max-width="520px"
+        :title="editingId ? 'Edit domain' : 'New domain'"
+        subtitle="A top-level material category (Overlay, Power, IT…) that item groups belong to."
+        @close="closeAdd"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ event.code }}</span><span>·</span><span>Domains</span>
+        </template>
 
-                <div class="skum-body">
                     <section class="skum-sec">
                         <div class="form-grid">
                             <div class="field">
@@ -254,37 +255,55 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             </div>
                         </div>
                     </section>
-                </div>
 
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
-                        <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Code and label are required</span>
-                    </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitDomain">
-                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add domain') }}
-                        </button>
-                    </div>
-                </footer>
-            </div>
-        </div>
-    </Teleport>
+        <template #footer-left>
+            <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
+            <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
+            <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Code and label are required</span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :disabled="!formValid"
+                :loading="saving"
+                :text="editingId ? 'Save changes' : 'Add domain'"
+                :loading-text="editingId ? 'Saving…' : 'Adding…'"
+                @click="submitDomain"
+            />
+        </template>
+    </FormModal>
 
     <ConfirmModal
         v-if="confirmDeleteRow"
         :title="`Remove ${confirmDeleteRow.label}?`"
-        message="Item groups assigned to it will block this until reassigned."
         confirm-text="Remove"
         loading-text="Removing…"
         :loading="deleting"
+        :confirm-disabled="!!deleteUsage"
         danger
         @cancel="confirmDeleteRow = null"
         @confirm="confirmDelete"
     >
-        <p v-if="deleteError" class="cfm-err">{{ deleteError }}</p>
+        <div v-if="deleteUsage" class="cfm-usage">
+            <div class="cfm-usage-head">
+                <i class="bx bx-error-circle"></i>
+                <span>{{ deleteError }}</span>
+            </div>
+            <div v-if="deleteUsage.itemGroups?.length" class="cfm-usage-grp">
+                <span class="cfm-usage-lbl">{{ deleteUsage.itemGroups.length === 1 ? 'Item group' : 'Item groups' }} ({{ deleteUsage.itemGroups.length }})</span>
+                <div class="cfm-usage-chips">
+                    <span v-for="label in deleteUsage.itemGroups" :key="label" class="cfm-chip">{{ label }}</span>
+                </div>
+            </div>
+            <div v-if="deleteUsage.catalogItems?.length" class="cfm-usage-grp">
+                <span class="cfm-usage-lbl">{{ deleteUsage.catalogItems.length === 1 ? 'Catalog item' : 'Catalog items' }} ({{ deleteUsage.catalogItems.length }})</span>
+                <div class="cfm-usage-chips">
+                    <span v-for="sku in deleteUsage.catalogItems" :key="sku" class="cfm-chip mono">{{ sku }}</span>
+                </div>
+            </div>
+            <p class="cfm-usage-hint">Reassign or remove these first, then try again.</p>
+        </div>
+        <p v-else-if="deleteError" class="cfm-err">{{ deleteError }}</p>
     </ConfirmModal>
 </template>
 
@@ -348,43 +367,31 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mp-icon-del:hover { background: #ffe4e6; }
 .cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
-/* ── Modal shell ──────────────────────────────────────────────────────────── */
-@keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
+/* ── Delete-blocked usage panel ──────────────────────────────────────────── */
+.cfm-usage {
+    margin-top: 12px; text-align: left;
+    background: #fef2f2; border: 1px solid #fecaca; border-radius: 9px;
+    padding: 12px 14px;
 }
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 520px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
+.cfm-usage-head {
+    display: flex; align-items: flex-start; gap: 7px;
+    font-size: 12.5px; font-weight: 600; color: #991b1b; line-height: 1.4;
 }
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
+.cfm-usage-head i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.cfm-usage-grp { margin-top: 10px; }
+.cfm-usage-lbl {
+    display: block; font-size: 10.5px; font-weight: 600; color: #b91c1c;
+    text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
 }
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
+.cfm-usage-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfm-chip {
+    display: inline-flex; align-items: center;
+    font-size: 11.5px; font-weight: 500; color: #7f1d1d;
+    background: #fff; border: 1px solid #fca5a5;
+    padding: 3px 8px; border-radius: 5px;
 }
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px; transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 62vh; }
+.cfm-usage-hint { font-size: 11.5px; color: #9f5252; margin: 10px 0 0; line-height: 1.4; }
+
 .skum-sec { padding: 20px 0; }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -410,13 +417,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .sel select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
 .sel svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
 
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px; border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
 .skum-ft-ok, .skum-ft-warn { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .skum-ft-ok   { color: #16a34a; }
 .skum-ft-warn { color: #b45309; }

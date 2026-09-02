@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\MaterialRequest;
 use App\Models\MaterialPlanning\RequestLine;
+use App\Models\MaterialPlanning\ServiceOption;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 
 class RequestLineController extends Controller
 {
@@ -22,12 +24,19 @@ class RequestLineController extends Controller
 
         $item = CatalogItem::where('sku', $data['sku'])->firstOrFail();
         Gate::authorize('createForRequest', [RequestLine::class, $materialRequest, $item]);
+        $this->assertSameEvent($item->event_id, $materialRequest->event_id, 'sku');
+
+        if (! empty($data['service_option_id'])) {
+            $option = ServiceOption::findOrFail($data['service_option_id']);
+            $this->assertSameEvent($option->event_id, $materialRequest->event_id, 'service_option_id');
+        }
 
         unset($data['sku']);
         $line = $materialRequest->lines()->create([
             ...$data,
             'catalog_item_id' => $item->id,
             'rate_snapshot' => $item->rate,
+            'event_id' => $materialRequest->event_id,
         ]);
 
         return response()->json($this->present($line->load(['catalogItem', 'serviceOption'])), 201);
@@ -42,6 +51,11 @@ class RequestLineController extends Controller
             'comment' => ['nullable', 'string', 'max:255'],
             'service_option_id' => ['nullable', 'exists:mp_service_options,id'],
         ]);
+
+        if (! empty($data['service_option_id'])) {
+            $option = ServiceOption::findOrFail($data['service_option_id']);
+            $this->assertSameEvent($option->event_id, $requestLine->request->event_id, 'service_option_id');
+        }
 
         $requestLine->update($data);
 
@@ -66,10 +80,15 @@ class RequestLineController extends Controller
             'service_option_id' => ['required', 'exists:mp_service_options,id'],
         ]);
 
-        $lines = RequestLine::whereIn('id', $data['line_ids'])->get();
+        $lines = RequestLine::with('request')->whereIn('id', $data['line_ids'])->get();
+        $option = ServiceOption::findOrFail($data['service_option_id']);
 
         foreach ($lines as $line) {
             Gate::authorize('update', $line);
+            $this->assertSameEvent($option->event_id, $line->request->event_id, 'service_option_id');
+        }
+
+        foreach ($lines as $line) {
             $line->update(['service_option_id' => $data['service_option_id']]);
         }
 
@@ -83,6 +102,16 @@ class RequestLineController extends Controller
                 'supplierName' => $l->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
             ])->values()->all(),
         ]);
+    }
+
+    /** Catalog items and service options are now single-event; reject cross-event assignment. */
+    private function assertSameEvent(int $itemEventId, int $requestEventId, string $field): void
+    {
+        if ($itemEventId !== $requestEventId) {
+            throw ValidationException::withMessages([
+                $field => 'This item is not available for the request\'s event.',
+            ]);
+        }
     }
 
     private function present(RequestLine $line): array

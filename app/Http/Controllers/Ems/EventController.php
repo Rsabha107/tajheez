@@ -40,6 +40,9 @@ class EventController extends Controller
             ->select([
                 'events.id',
                 'events.name',
+                'events.code',
+                'events.start_date',
+                'events.end_date',
                 'events.event_logo',
                 'events.active_flag',
                 'events.created_at',
@@ -66,6 +69,9 @@ class EventController extends Controller
                 return [
                     'id'           => $e->id,
                     'name'         => $e->name,
+                    'code'         => $e->code,
+                    'start_date'   => $e->start_date?->format('Y-m-d'),
+                    'end_date'     => $e->end_date?->format('Y-m-d'),
                     'event_logo'   => $e->event_logo,
                     'logo_url'     => $e->event_logo ? asset('storage/event-logos/' . $e->event_logo) : null,
                     'active_flag'  => $e->active_flag,
@@ -86,6 +92,9 @@ class EventController extends Controller
     {
         $data = $request->validate([
             'name'        => ['required', 'string', 'max:255'],
+            'code'        => ['nullable', 'string', 'max:20', 'unique:events,code'],
+            'start_date'  => ['nullable', 'date'],
+            'end_date'    => ['nullable', 'date', 'after_or_equal:start_date'],
             'active_flag' => ['required', 'exists:global_statuses,id'],
             'logo'        => ['nullable', 'image', 'max:2048'],
             'venue_ids'   => ['nullable', 'array'],
@@ -109,6 +118,9 @@ class EventController extends Controller
     {
         $data = $request->validate([
             'name'        => ['required', 'string', 'max:255'],
+            'code'        => ['nullable', 'string', 'max:20', 'unique:events,code,' . $event->id],
+            'start_date'  => ['nullable', 'date'],
+            'end_date'    => ['nullable', 'date', 'after_or_equal:start_date'],
             'active_flag' => ['required', 'exists:global_statuses,id'],
             'logo'        => ['nullable', 'image', 'max:2048'],
             'venue_ids'   => ['nullable', 'array'],

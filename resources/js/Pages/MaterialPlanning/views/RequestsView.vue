@@ -139,6 +139,15 @@ const eventRequests = computed(() =>
     props.event?.id ? props.requests.filter(r => r.eventId === props.event.id) : props.requests
 );
 
+// Venue filter is scoped to whichever venues are attached to the active
+// event; an event with none attached falls back to every venue.
+const eventVenues = computed(() =>
+    props.event?.venueIds?.length ? props.venues.filter(v => props.event.venueIds.includes(v.id)) : props.venues
+);
+
+const eventAreas = computed(() => props.event?.id ? props.areas.filter(a => a.eventId === props.event.id) : props.areas);
+const eventSpaces = computed(() => props.event?.id ? props.spaces.filter(s => s.eventId === props.event.id) : props.spaces);
+
 const filteredRequests = computed(() => {
     let rows = eventRequests.value.slice();
     if (props.approvalOnly) rows = rows.filter(r => ['submitted','l1','l2','finance','changed'].includes(r.status));
@@ -190,8 +199,8 @@ const activeFilterChips = computed(() => {
     if (reqDomain.value !== 'all') chips.push({ key: 'domain', label: `Domain: ${domainOf(reqDomain.value)?.label ?? reqDomain.value}`, remove: () => { reqDomain.value = 'all'; } });
     if (reqVenue.value !== 'all') chips.push({ key: 'venue', label: `Venue: ${venueOf(reqVenue.value)?.name ?? reqVenue.value}`, remove: () => { reqVenue.value = 'all'; } });
     if (reqFA.value !== 'all') chips.push({ key: 'fa', label: `Functional Area: ${reqFA.value}`, remove: () => { reqFA.value = 'all'; } });
-    if (reqArea.value !== 'all') chips.push({ key: 'area', label: `Area: ${props.areas.find(a => a.id === reqArea.value)?.label ?? reqArea.value}`, remove: () => { reqArea.value = 'all'; } });
-    if (reqSpace.value !== 'all') chips.push({ key: 'space', label: `Space: ${props.spaces.find(s => s.id === reqSpace.value)?.name ?? reqSpace.value}`, remove: () => { reqSpace.value = 'all'; } });
+    if (reqArea.value !== 'all') chips.push({ key: 'area', label: `Area: ${eventAreas.value.find(a => a.id === reqArea.value)?.label ?? reqArea.value}`, remove: () => { reqArea.value = 'all'; } });
+    if (reqSpace.value !== 'all') chips.push({ key: 'space', label: `Space: ${eventSpaces.value.find(s => s.id === reqSpace.value)?.name ?? reqSpace.value}`, remove: () => { reqSpace.value = 'all'; } });
     return chips;
 });
 
@@ -251,21 +260,21 @@ function avatarColor(initials) {
                         <label>Venue</label>
                         <select v-model="reqVenue">
                             <option value="all">All venues</option>
-                            <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
+                            <option v-for="v in eventVenues" :key="v.code" :value="v.code">{{ v.name }}</option>
                         </select>
                     </div>
                     <div class="fp-field">
                         <label>Area</label>
                         <select v-model="reqArea">
                             <option value="all">All</option>
-                            <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                            <option v-for="a in eventAreas" :key="a.id" :value="a.id">{{ a.label }}</option>
                         </select>
                     </div>
                     <div class="fp-field">
                         <label>Space</label>
                         <select v-model="reqSpace">
                             <option value="all">All</option>
-                            <option v-for="s in spaces" :key="s.id" :value="s.id">{{ s.name }}</option>
+                            <option v-for="s in eventSpaces" :key="s.id" :value="s.id">{{ s.name }}</option>
                         </select>
                     </div>
                 </div>

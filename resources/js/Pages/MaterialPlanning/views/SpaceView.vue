@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import FormModal from '../components/FormModal.vue';
+import ProgressButton from '../components/ProgressButton.vue';
 
 const props = defineProps({
     spaces:      Array,
@@ -12,6 +14,8 @@ const props = defineProps({
 });
 
 const spaceList = ref([...props.spaces]);
+const eventSpaces = computed(() => props.event?.id ? spaceList.value.filter(s => s.eventId === props.event.id) : spaceList.value);
+const eventAreas = computed(() => props.event?.id ? props.areas.filter(a => a.eventId === props.event.id) : props.areas);
 
 const STATUS_COLORS = {
     success: { bg: '#dcfce7', fg: '#166534' },
@@ -27,7 +31,7 @@ function defaultStatusId() { return props.statuses.find(s => s.name === 'active'
 const q = ref('');
 const fArea = ref('all');
 const rows = computed(() => {
-    let r = spaceList.value.slice();
+    let r = eventSpaces.value.slice();
     if (fArea.value !== 'all') r = r.filter(s => s.area === fArea.value);
     if (q.value) {
         const k = q.value.toLowerCase();
@@ -36,7 +40,7 @@ const rows = computed(() => {
     return r.sort((a, b) => a.name.localeCompare(b.name));
 });
 
-function areaLabel(code) { return props.areas.find(a => a.id === code)?.label || code; }
+function areaLabel(code) { return eventAreas.value.find(a => a.id === code)?.label || code; }
 
 // ── Add / edit space modal ────────────────────────────────────────────────────
 const showAdd = ref(false);
@@ -46,7 +50,7 @@ const justAdded = ref(null);
 const editingId = ref(null);
 
 function freshForm() {
-    return { code: '', area: props.areas[0]?.id ?? '', name: '', description: '', status: defaultStatusId() };
+    return { code: '', area: eventAreas.value[0]?.id ?? '', name: '', description: '', status: defaultStatusId() };
 }
 const form = ref(freshForm());
 const formValid = computed(() => form.value.code.trim() && form.value.area && form.value.name.trim());
@@ -82,6 +86,7 @@ async function submitSpace() {
         description: form.value.description.trim() || null,
         status_id: form.value.status,
     };
+    if (!editingId.value) payload.event_id = props.event.id;
     try {
         if (editingId.value) {
             const { data } = await axios.put(route('mp.spaces.update', editingId.value), payload);
@@ -128,9 +133,6 @@ async function confirmDelete() {
     }
 }
 
-function onEsc(e) { if (e.key === 'Escape' && showAdd.value) closeAdd(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
@@ -138,7 +140,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Spaces</h1>
-                <p class="mp-page-sub">{{ spaceList.length }} named spaces · requests get built out against these</p>
+                <p class="mp-page-sub">{{ eventSpaces.length }} named spaces · requests get built out against these</p>
             </div>
             <div class="mp-head-actions">
                 <button v-if="permissions.isAdmin" class="mp-btn mp-btn-primary" @click="openAdd">+ New space</button>
@@ -154,7 +156,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 <label>Area</label>
                 <select v-model="fArea">
                     <option value="all">All areas</option>
-                    <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                    <option v-for="a in eventAreas" :key="a.id" :value="a.id">{{ a.label }}</option>
                 </select>
             </div>
         </div>
@@ -189,25 +191,21 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                 </tbody>
             </table>
         </div>
-        <div class="dt-foot">Showing <b>{{ rows.length }}</b> of {{ spaceList.length }} spaces</div>
+        <div class="dt-foot">Showing <b>{{ rows.length }}</b> of {{ eventSpaces.length }} spaces</div>
     </div>
 
     <!-- ── New space modal ───────────────────────────────────────────────── -->
-    <Teleport to="body" v-if="showAdd">
-        <div class="skum-scrim" @click.self="closeAdd">
-            <div class="skum" role="dialog" aria-modal="true">
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Spaces</span></div>
-                        <h2 class="skum-title">{{ editingId ? 'Edit space' : 'New space' }}</h2>
-                        <p class="skum-sub">A named space within a functional area that requests get built out against.</p>
-                    </div>
-                    <button class="skum-x" @click="closeAdd" aria-label="Close">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
+    <FormModal
+        :show="showAdd"
+        max-width="520px"
+        :title="editingId ? 'Edit space' : 'New space'"
+        subtitle="A named space within a functional area that requests get built out against."
+        @close="closeAdd"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ event.code }}</span><span>·</span><span>Spaces</span>
+        </template>
 
-                <div class="skum-body">
                     <section class="skum-sec">
                         <div class="form-grid">
                             <div class="field">
@@ -219,7 +217,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 <label class="field-lbl">Area</label>
                                 <div class="sel">
                                     <select v-model="form.area">
-                                        <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                                        <option v-for="a in eventAreas" :key="a.id" :value="a.id">{{ a.label }}</option>
                                     </select>
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                                 </div>
@@ -243,24 +241,23 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                             </div>
                         </div>
                     </section>
-                </div>
 
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
-                        <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Code, area and name are required</span>
-                    </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitSpace">
-                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add space') }}
-                        </button>
-                    </div>
-                </footer>
-            </div>
-        </div>
-    </Teleport>
+        <template #footer-left>
+            <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
+            <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
+            <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Code, area and name are required</span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :disabled="!formValid"
+                :loading="saving"
+                :text="editingId ? 'Save changes' : 'Add space'"
+                :loading-text="editingId ? 'Saving…' : 'Adding…'"
+                @click="submitSpace"
+            />
+        </template>
+    </FormModal>
 
     <ConfirmModal
         v-if="confirmDeleteRow"
@@ -342,43 +339,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mp-icon-del:hover { background: #ffe4e6; }
 .cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
-/* ── Modal shell ──────────────────────────────────────────────────────────── */
-@keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
-}
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 520px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
-}
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
-}
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
-}
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px; transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 62vh; }
 .skum-sec { padding: 20px 0; }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -400,13 +360,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .sel select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
 .sel svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
 
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px; border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
 .skum-ft-ok, .skum-ft-warn { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .skum-ft-ok   { color: #16a34a; }
 .skum-ft-warn { color: #b45309; }

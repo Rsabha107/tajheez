@@ -2,6 +2,7 @@
 
 namespace App\Models\MaterialPlanning;
 
+use App\Models\Ems\Event;
 use Illuminate\Database\Eloquent\Model;
 
 class CatalogItem extends Model
@@ -13,6 +14,11 @@ class CatalogItem extends Model
     public function domain()
     {
         return $this->belongsTo(Domain::class, 'domain_id');
+    }
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class, 'event_id');
     }
 
     public function requestLines()

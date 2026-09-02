@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import axios from "axios";
+import ProgressButton from "@/Pages/MaterialPlanning/components/ProgressButton.vue";
+import FormModal from "@/Pages/MaterialPlanning/components/FormModal.vue";
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -96,20 +98,16 @@ async function save() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="rp-modal-overlay" @click.self="closeModal">
-      <div class="rp-modal-box">
-        <!-- Header -->
-        <div class="rp-modal-header">
-          <h5 class="rp-modal-title">
-            <i class="fa fa-key me-2 text-primary"></i>
-            {{ mode === "create" ? "Assign Permissions to Role" : "Edit Role Permissions" }}
-          </h5>
-          <button class="btn-close" @click="closeModal"></button>
-        </div>
+  <FormModal
+    :show="show"
+    :title="mode === 'create' ? 'Assign Permissions to Role' : 'Edit Role Permissions'"
+    :subtitle="mode === 'create' ? 'Pick a role and the permissions it should have.' : 'Update which permissions this role has.'"
+    @close="closeModal"
+  >
+    <template #eyebrow>
+      <span>Roles &amp; Permissions</span>
+    </template>
 
-        <!-- Body -->
-        <div class="rp-modal-body">
           <div v-if="isLoading" class="text-center py-4">
             <div class="spinner-border text-primary" role="status"></div>
           </div>
@@ -146,13 +144,12 @@ async function save() {
                   Permissions
                   <span class="badge-count">{{ permissionIds.length }} selected</span>
                 </label>
-                <button
-                  type="button"
+                <ProgressButton
+                  variant="bootstrap"
                   class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+                  text="Clear all"
                   @click="permissionIds = []"
-                >
-                  Clear all
-                </button>
+                />
               </div>
 
               <input
@@ -187,74 +184,23 @@ async function save() {
               </div>
             </div>
           </template>
-        </div>
 
-        <!-- Footer -->
-        <div class="rp-modal-footer">
-          <button class="btn btn-light" @click="closeModal">Cancel</button>
-          <button class="btn btn-primary" :disabled="isSaving || isLoading" @click="save">
-            <span v-if="isSaving" class="spinner-border spinner-border-sm me-1"></span>
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+    <template #footer-actions>
+      <ProgressButton
+        variant="primary"
+        color="#0f766e"
+        hover-color="#0d9488"
+        :disabled="isLoading"
+        :loading="isSaving"
+        text="Save"
+        loading-text="Saving..."
+        @click="save"
+      />
+    </template>
+  </FormModal>
 </template>
 
 <style scoped>
-.rp-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1050;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.rp-modal-box {
-  background: #fff;
-  border-radius: 18px;
-  width: 520px;
-  max-width: 95vw;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
-}
-
-.rp-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid #eaecf6;
-  flex-shrink: 0;
-}
-
-.rp-modal-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.rp-modal-body {
-  padding: 1.25rem;
-  overflow-y: auto;
-  flex: 1 1 auto;
-}
-
-.rp-modal-footer {
-  padding: 1rem 1.25rem;
-  border-top: 1px solid #eaecf6;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
 .role-label {
   font-size: 15px;
   font-weight: 600;

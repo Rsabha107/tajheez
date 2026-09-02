@@ -9,12 +9,13 @@ const props = defineProps({
     loadingText: { type: String, default: 'Deleting…' },
     danger:      { type: Boolean, default: true },
     loading:     { type: Boolean, default: false },
+    confirmDisabled: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['confirm', 'cancel']);
 
 function cancel()  { if (!props.loading) emit('cancel'); }
-function confirm() { if (!props.loading) emit('confirm'); }
+function confirm() { if (!props.loading && !props.confirmDisabled) emit('confirm'); }
 
 function onEsc(e) { if (e.key === 'Escape') cancel(); }
 onMounted(()   => document.addEventListener('keydown', onEsc));
@@ -36,7 +37,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <button
                         class="mp-btn"
                         :class="danger ? 'mp-btn-danger' : 'mp-btn-primary'"
-                        :disabled="loading"
+                        :disabled="loading || confirmDisabled"
                         @click="confirm"
                     >{{ loading ? loadingText : confirmText }}</button>
                 </div>

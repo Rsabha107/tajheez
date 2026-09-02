@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\Space;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class SpaceController extends Controller
 {
@@ -22,7 +23,8 @@ class SpaceController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'max:20', 'unique:mp_spaces,code'],
-            'area_id' => ['required', 'exists:mp_areas,id'],
+            'event_id' => ['required', 'exists:events,id'],
+            'area_id' => ['required', Rule::exists('mp_areas', 'id')->where('event_id', $request->input('event_id'))],
             'name' => ['required', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:255'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
@@ -38,8 +40,11 @@ class SpaceController extends Controller
     {
         Gate::authorize('update', $space);
 
+        $eventId = $request->input('event_id', $space->event_id);
+
         $data = $request->validate([
-            'area_id' => ['sometimes', 'exists:mp_areas,id'],
+            'event_id' => ['sometimes', 'exists:events,id'],
+            'area_id' => ['sometimes', Rule::exists('mp_areas', 'id')->where('event_id', $eventId)],
             'name' => ['sometimes', 'string', 'max:120'],
             'description' => ['nullable', 'string', 'max:255'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
@@ -64,6 +69,7 @@ class SpaceController extends Controller
         return [
             'id' => $space->id,
             'code' => $space->code,
+            'eventId' => $space->event_id,
             'name' => $space->name,
             'description' => $space->description,
             'area' => $space->area_id,

@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import ProgressButton from '../components/ProgressButton.vue';
+import FormModal from '../components/FormModal.vue';
 
 const emit = defineEmits(['go-to']);
 
@@ -19,6 +21,18 @@ function canManage(domain) { return props.permissions.isAdmin || props.permissio
 // Local writable copy so we can optimistically add items
 const catalogItems = ref([...props.catalog]);
 
+// Catalog items are now event-scoped — narrow to the active event, same
+// pattern as eventItems/eventChangeOrders elsewhere in the module.
+const eventCatalog = computed(() =>
+    props.event?.id ? catalogItems.value.filter(i => i.eventId === props.event.id) : catalogItems.value
+);
+const eventServiceOptions = computed(() =>
+    props.event?.id ? props.serviceOptions.filter(o => o.eventId === props.event.id) : props.serviceOptions
+);
+const eventDomains = computed(() =>
+    props.event?.id ? props.domains.filter(d => d.eventId === props.event.id) : props.domains
+);
+
 // ── Filters ───────────────────────────────────────────────────────────────────
 const catDomain  = ref('all');
 const catSearch  = ref('');
@@ -33,7 +47,7 @@ const sourceRental     = ref(true);
 const sourceNew        = ref(false);
 // The slider's ceiling must track the actual catalog — a hardcoded cap silently
 // hides any item priced above it with no way to reveal it (items > cap just vanish).
-const rateCeiling = computed(() => catalogItems.value.reduce((m, i) => Math.max(m, Math.ceil(i.rate / 1000) * 1000), 20000));
+const rateCeiling = computed(() => eventCatalog.value.reduce((m, i) => Math.max(m, Math.ceil(i.rate / 1000) * 1000), 20000));
 const maxRate      = ref(rateCeiling.value);
 watch(rateCeiling, (next, prev) => {
     if (maxRate.value === prev) maxRate.value = next; // only auto-follow if the user hasn't narrowed it manually
@@ -48,11 +62,11 @@ function refreshCatalog() {
 
 // ── Derived ───────────────────────────────────────────────────────────────────
 const facets = computed(() =>
-    props.domains.map(d => ({ ...d, count: catalogItems.value.filter(c => c.domain === d.code).length }))
+    eventDomains.value.map(d => ({ ...d, count: eventCatalog.value.filter(c => c.domain === d.code).length }))
 );
 
 const filteredCatalog = computed(() => {
-    let items = catalogItems.value.slice();
+    let items = eventCatalog.value.slice();
     if (catDomain.value !== 'all') items = items.filter(i => i.domain === catDomain.value);
     if (catSearch.value) {
         const q = catSearch.value.toLowerCase();
@@ -71,7 +85,7 @@ const filteredCatalog = computed(() => {
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(code) { return props.domains.find(d => d.code === code) || props.domains[0]; }
+function domainOf(code) { return eventDomains.value.find(d => d.code === code) || eventDomains.value[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 function stockPct(it)  { return Math.min(100, (it.stock / it.baseline) * 100); }
 function stockColor(it) {
@@ -100,7 +114,28 @@ const skuTail = ref('');
 const skuGroupCode  = computed(() => (skuForm.value.group.replace(/[^A-Za-z]/g,'').slice(0,2)||'XX').toUpperCase());
 const autoSku       = computed(() => `${DOMAIN_PREFIX[skuForm.value.domain]||skuForm.value.domain}-${skuGroupCode.value}-${skuTail.value}`);
 const sku           = computed(() => skuForm.value.skuOverride ?? autoSku.value);
-const skuValid      = computed(() => skuForm.value.name.trim() && skuForm.value.group.trim() && skuForm.value.rate && skuForm.value.baseline);
+const skuValid      = computed(() =>
+    skuForm.value.name.trim() && skuForm.value.group.trim() && skuForm.value.sub.trim() && sku.value.trim()
+);
+// Only surfaced once the user tries to save with something missing, so the
+// modal doesn't open already covered in red.
+const attemptedSave = ref(false);
+const skuFieldErrors = computed(() => ({
+    group: attemptedSave.value && !skuForm.value.group.trim(),
+    sub: attemptedSave.value && !skuForm.value.sub.trim(),
+    name: attemptedSave.value && !skuForm.value.name.trim(),
+    sku: attemptedSave.value && !sku.value.trim(),
+}));
+// Group/Subgroup are picked from what's already used for the selected domain
+// (across all events — a brand-new event's catalog starts empty, so scoping
+// this to eventCatalog would leave the dropdown with nothing to offer).
+const groupOptions = computed(() =>
+    [...new Set(catalogItems.value.filter(c => c.domain === skuForm.value.domain).map(c => c.group))].filter(Boolean).sort()
+);
+const subOptions = computed(() =>
+    [...new Set(catalogItems.value.filter(c => c.domain === skuForm.value.domain && c.group === skuForm.value.group).map(c => c.sub))].filter(Boolean).sort()
+);
+
 const skuBaselinePct = computed(() => {
     const b = +skuForm.value.baseline, s = +skuForm.value.stock;
     return b && s ? Math.min(100, Math.round((s / b) * 100)) : 0;
@@ -111,6 +146,7 @@ function openAddSku() {
     editTarget.value = null;
     skuForm.value = freshForm();
     skuTail.value = String(100 + Math.floor(Math.random() * 8900)).padStart(4, '0');
+    attemptedSave.value = false;
     showAddSku.value = true;
 }
 function openEdit(it) {
@@ -120,6 +156,7 @@ function openEdit(it) {
         rate: String(it.rate), baseline: String(it.baseline), stock: String(it.stock),
         source: 'own', notes: '', skuOverride: it.sku,
     };
+    attemptedSave.value = false;
     showAddSku.value = true;
 }
 function closeSkuModal() { showAddSku.value = false; editTarget.value = null; }
@@ -128,7 +165,8 @@ const savingSku = ref(false);
 const skuError = ref(null);
 
 async function saveSku() {
-    if (!skuValid.value || savingSku.value) return;
+    if (savingSku.value) return;
+    if (!skuValid.value) { attemptedSave.value = true; return; }
     savingSku.value = true;
     skuError.value = null;
     try {
@@ -151,6 +189,7 @@ async function saveSku() {
                 ...payload,
                 sku: sku.value,
                 domain_code: skuForm.value.domain,
+                event_id: props.event.id,
             }));
             catalogItems.value.unshift(data);
         }
@@ -171,11 +210,13 @@ async function saveSku() {
 const confirmDeleteItem = ref(null);
 const deletingItem = ref(false);
 const deleteItemError = ref(null);
-function askDelete(it) { confirmDeleteItem.value = it; deleteItemError.value = null; }
+const deleteItemUsage = ref(null); // { requests: [...codes], changeOrders: [...codes] } when in use
+function askDelete(it) { confirmDeleteItem.value = it; deleteItemError.value = null; deleteItemUsage.value = null; }
 async function confirmDelete() {
     if (!confirmDeleteItem.value) return;
     deletingItem.value = true;
     deleteItemError.value = null;
+    deleteItemUsage.value = null;
     try {
         await axios.delete(route('mp.catalog-items.destroy', confirmDeleteItem.value.dbId));
         catalogItems.value = catalogItems.value.filter(i => i.sku !== confirmDeleteItem.value.sku);
@@ -183,15 +224,13 @@ async function confirmDelete() {
     } catch (e) {
         deleteItemError.value = e.response?.status === 403
             ? "You don't have permission to remove this SKU."
-            : 'Could not remove this SKU.';
+            : (e.response?.data?.message ?? 'Could not remove this SKU.');
+        deleteItemUsage.value = e.response?.data?.usage ?? null;
     } finally {
         deletingItem.value = false;
     }
 }
 
-function onEsc(e) { if (e.key === 'Escape' && showAddSku.value) closeSkuModal(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
@@ -201,7 +240,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         <div class="mp-page-head">
             <div>
                 <h1 class="mp-page-title">Item catalog</h1>
-                <p class="mp-page-sub">{{ catalogItems.length }} active SKUs across {{ domains.length }} domains · {{ serviceOptions.length }} service option bundles in Service options</p>
+                <p class="mp-page-sub">{{ eventCatalog.length }} active SKUs across {{ eventDomains.length }} domains · {{ eventServiceOptions.length }} service option bundles in Service options</p>
             </div>
             <div class="mp-head-actions">
                 <button class="mp-btn mp-btn-icon" title="Refresh catalog" @click="refreshCatalog">
@@ -228,7 +267,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     <div class="cat-side-lbl">Domain</div>
                     <button class="cat-facet" :class="{ 'cat-facet-on': catDomain === 'all' }" @click="catDomain = 'all'">
                         <span>All domains</span>
-                        <span class="mono">{{ catalog.length }}</span>
+                        <span class="mono">{{ eventCatalog.length }}</span>
                     </button>
                     <button
                         v-for="d in facets" :key="d.id"
@@ -375,32 +414,21 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                     </div>
                 </div>
 
-                <div class="dt-foot">Showing <b>{{ filteredCatalog.length }}</b> of {{ catalog.length }} items</div>
+                <div class="dt-foot">Showing <b>{{ filteredCatalog.length }}</b> of {{ eventCatalog.length }} items</div>
             </div>
         </div>
     </div>
 
     <!-- ── Add SKU modal ──────────────────────────────────────────────── -->
-    <Teleport to="body">
-        <div v-if="showAddSku" class="skum-scrim" @click.self="closeSkuModal">
-            <div class="skum">
-
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag">
-                            <span class="mono">{{ event.code }}</span>
-                            <span>·</span>
-                            <span>Catalog</span>
-                        </div>
-                        <h2 class="skum-title">{{ editTarget ? 'Edit SKU' : 'Add SKU' }}</h2>
-                        <p class="skum-sub">{{ editTarget ? 'Update this catalog item. Domain and SKU code can\'t be changed once created.' : 'Register a new catalog item. Baseline drives stock coverage and procurement gap reports.' }}</p>
-                    </div>
-                    <button class="skum-x" @click="closeSkuModal">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
-
-                <div class="skum-body">
+    <FormModal
+        :show="showAddSku"
+        :title="editTarget ? 'Edit SKU' : 'Add SKU'"
+        :subtitle="editTarget ? 'Update this catalog item. Domain and SKU code can\'t be changed once created.' : 'Register a new catalog item. Baseline drives stock coverage and procurement gap reports.'"
+        @close="closeSkuModal"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ event.code }}</span><span>·</span><span>Catalog</span>
+        </template>
 
                     <!-- 1 · Classification -->
                     <section class="skum-sec">
@@ -412,10 +440,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <div class="field" style="margin-bottom:14px">
                             <label class="field-lbl">Domain</label>
                             <div v-if="!editTarget" class="skum-domains">
-                                <button v-for="d in domains" :key="d.id" type="button"
+                                <button v-for="d in eventDomains" :key="d.id" type="button"
                                     class="skum-dom" :class="{ 'skum-dom-on': skuForm.domain === d.code }"
                                     :style="skuForm.domain === d.code ? { borderColor: d.color, background: d.chip } : {}"
-                                    @click="skuForm.domain = d.code">
+                                    @click="skuForm.domain = d.code; skuForm.group = ''; skuForm.sub = '';">
                                     <span class="skum-dom-top">
                                         <span class="skum-dom-sw" :style="{ background: d.color }"></span>
                                         <span class="skum-dom-lbl">{{ d.label }}</span>
@@ -433,11 +461,27 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         <div class="skum-grid skum-grid-2">
                             <div class="field">
                                 <label class="field-lbl">Group</label>
-                                <input v-model="skuForm.group" type="text" placeholder="e.g. Network, Tents, Generators" />
+                                <div class="skum-sel-wrap" :class="{ 'field-bad': skuFieldErrors.group }">
+                                    <select v-model="skuForm.group" @change="skuForm.sub = ''">
+                                        <option value="" disabled>Select a group…</option>
+                                        <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+                                    </select>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </div>
+                                <span v-if="skuFieldErrors.group" class="field-err">Required</span>
+                                <span v-else-if="!groupOptions.length" class="field-hint">No groups exist yet for this domain.</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Subgroup</label>
-                                <input v-model="skuForm.sub" type="text" placeholder="e.g. Switches, Structures, Distro" />
+                                <div class="skum-sel-wrap" :class="{ 'field-bad': skuFieldErrors.sub }">
+                                    <select v-model="skuForm.sub" :disabled="!skuForm.group">
+                                        <option value="" disabled>Select a subgroup…</option>
+                                        <option v-for="s in subOptions" :key="s" :value="s">{{ s }}</option>
+                                    </select>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                                </div>
+                                <span v-if="skuFieldErrors.sub" class="field-err">Required</span>
+                                <span v-else-if="skuForm.group && !subOptions.length" class="field-hint">No subgroups exist yet for this group.</span>
                             </div>
                         </div>
                     </section>
@@ -451,12 +495,13 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         </div>
                         <div class="field" style="margin-bottom:12px">
                             <label class="field-lbl">Item name</label>
-                            <input v-model="skuForm.name" type="text" placeholder="e.g. Cisco Catalyst 9300-48P" />
+                            <input v-model="skuForm.name" type="text" placeholder="e.g. Cisco Catalyst 9300-48P" :class="{ 'field-bad': skuFieldErrors.name }" />
+                            <span v-if="skuFieldErrors.name" class="field-err">Required</span>
                         </div>
                         <div class="skum-grid skum-grid-12">
                             <div class="field">
                                 <label class="field-lbl">SKU code</label>
-                                <div class="skum-skubox">
+                                <div class="skum-skubox" :class="{ 'field-bad': skuFieldErrors.sku }">
                                     <input class="mono" type="text" :value="sku" :disabled="!!editTarget"
                                         @input="skuForm.skuOverride = $event.target.value" />
                                     <button v-if="!editTarget" type="button" class="skum-skubtn" title="Regenerate from domain + group"
@@ -464,7 +509,8 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 1 3 6.7M3 21v-5h5"/></svg>
                                     </button>
                                 </div>
-                                <span class="field-hint">{{ editTarget ? 'Locked — can\'t be changed once created.' : 'Auto-generated from domain + group. Edit if you have an existing supplier code.' }}</span>
+                                <span v-if="skuFieldErrors.sku" class="field-err">Required</span>
+                                <span v-else class="field-hint">{{ editTarget ? 'Locked — can\'t be changed once created.' : 'Auto-generated from domain + group. Edit if you have an existing supplier code.' }}</span>
                             </div>
                             <div class="field">
                                 <label class="field-lbl">Catalog preview</label>
@@ -497,7 +543,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                                 </div>
                             </div>
                             <div class="field">
-                                <label class="field-lbl">Rate (USD)</label>
+                                <label class="field-lbl">Rate (USD) <span class="field-opt">optional</span></label>
                                 <div class="skum-money">
                                     <span class="skum-money-pre">$</span>
                                     <input class="mono" v-model="skuForm.rate" type="number" min="0" placeholder="0" />
@@ -526,7 +572,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         </div>
                         <div class="skum-grid skum-grid-2">
                             <div class="field">
-                                <label class="field-lbl">Baseline ({{ event.code }} target)</label>
+                                <label class="field-lbl">Baseline ({{ event.code }} target) <span class="field-opt">optional</span></label>
                                 <input class="mono" v-model="skuForm.baseline" type="number" min="0" placeholder="0" />
                                 <span class="field-hint">Quantity needed at event peak. Drives the procurement gap.</span>
                             </div>
@@ -572,30 +618,28 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
                         </div>
                     </section>
 
-                </div><!-- /.skum-body -->
-
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span class="mono skum-ft-chip">{{ sku }}</span>
-                        <span v-if="skuError" class="skum-ft-warn">
-                            <span class="skum-ft-dot" style="background:#b45309"></span>{{ skuError }}
-                        </span>
-                        <span v-else-if="skuValid" class="skum-ft-ok">
-                            <span class="skum-ft-dot" style="background:#16a34a"></span>Ready to {{ editTarget ? 'save' : 'add' }}
-                        </span>
-                        <span v-else class="skum-ft-warn">
-                            <span class="skum-ft-dot" style="background:#b45309"></span>Name, group, rate &amp; baseline required
-                        </span>
-                    </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="closeSkuModal">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!skuValid || savingSku" @click="saveSku">{{ savingSku ? (editTarget ? 'Saving…' : 'Adding…') : (editTarget ? 'Save changes' : 'Add to catalog') }}</button>
-                    </div>
-                </footer>
-
-            </div>
-        </div>
-    </Teleport>
+        <template #footer-left>
+            <span class="mono skum-ft-chip">{{ sku }}</span>
+            <span v-if="skuError" class="skum-ft-warn">
+                <span class="skum-ft-dot" style="background:#b45309"></span>{{ skuError }}
+            </span>
+            <span v-else-if="skuValid" class="skum-ft-ok">
+                <span class="skum-ft-dot" style="background:#16a34a"></span>Ready to {{ editTarget ? 'save' : 'add' }}
+            </span>
+            <span v-else class="skum-ft-warn">
+                <span class="skum-ft-dot" style="background:#b45309"></span>Name, group, subgroup &amp; SKU required
+            </span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :loading="savingSku"
+                :text="editTarget ? 'Save changes' : 'Add to catalog'"
+                :loading-text="editTarget ? 'Saving…' : 'Adding…'"
+                @click="saveSku"
+            />
+        </template>
+    </FormModal>
 
     <ConfirmModal
         v-if="confirmDeleteItem"
@@ -603,11 +647,31 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
         confirm-text="Remove"
         loading-text="Removing…"
         :loading="deletingItem"
+        :confirm-disabled="!!deleteItemUsage"
         danger
         @cancel="confirmDeleteItem = null"
         @confirm="confirmDelete"
     >
-        <p v-if="deleteItemError" class="cfm-err">{{ deleteItemError }}</p>
+        <div v-if="deleteItemUsage" class="cfm-usage">
+            <div class="cfm-usage-head">
+                <i class="bx bx-error-circle"></i>
+                <span>{{ deleteItemError }}</span>
+            </div>
+            <div v-if="deleteItemUsage.requests?.length" class="cfm-usage-grp">
+                <span class="cfm-usage-lbl">{{ deleteItemUsage.requests.length === 1 ? 'Request' : 'Requests' }} ({{ deleteItemUsage.requests.length }})</span>
+                <div class="cfm-usage-chips">
+                    <span v-for="code in deleteItemUsage.requests" :key="code" class="cfm-chip mono">{{ code }}</span>
+                </div>
+            </div>
+            <div v-if="deleteItemUsage.changeOrders?.length" class="cfm-usage-grp">
+                <span class="cfm-usage-lbl">{{ deleteItemUsage.changeOrders.length === 1 ? 'Change order' : 'Change orders' }} ({{ deleteItemUsage.changeOrders.length }})</span>
+                <div class="cfm-usage-chips">
+                    <span v-for="code in deleteItemUsage.changeOrders" :key="code" class="cfm-chip mono">{{ code }}</span>
+                </div>
+            </div>
+            <p class="cfm-usage-hint">Remove it from these first, then try again.</p>
+        </div>
+        <p v-else-if="deleteItemError" class="cfm-err">{{ deleteItemError }}</p>
     </ConfirmModal>
 </template>
 
@@ -728,6 +792,31 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mp-icon-del:hover { background: #ffe4e6; }
 .cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
+/* ── Delete-blocked usage panel ──────────────────────────────────────────── */
+.cfm-usage {
+    margin-top: 12px; text-align: left;
+    background: #fef2f2; border: 1px solid #fecaca; border-radius: 9px;
+    padding: 12px 14px;
+}
+.cfm-usage-head {
+    display: flex; align-items: flex-start; gap: 7px;
+    font-size: 12.5px; font-weight: 600; color: #991b1b; line-height: 1.4;
+}
+.cfm-usage-head i { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.cfm-usage-grp { margin-top: 10px; }
+.cfm-usage-lbl {
+    display: block; font-size: 10.5px; font-weight: 600; color: #b91c1c;
+    text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px;
+}
+.cfm-usage-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfm-chip {
+    display: inline-flex; align-items: center;
+    font-size: 11.5px; font-weight: 500; color: #7f1d1d;
+    background: #fff; border: 1px solid #fca5a5;
+    padding: 3px 8px; border-radius: 5px;
+}
+.cfm-usage-hint { font-size: 11.5px; color: #9f5252; margin: 10px 0 0; line-height: 1.4; }
+
 .mp-dtag {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 600;
@@ -772,47 +861,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .ta-r  { text-align: right; }
 
 /* ── Add SKU modal ──────────────────────────────────────────────────────────── */
-@keyframes skum-fade { from { opacity:0 } to { opacity:1 } }
-@keyframes skum-pop  { from { opacity:0; transform:translateY(14px) scale(.97) } to { opacity:1; transform:none } }
 @keyframes skum-newrow { 0%,100%{background:transparent} 20%{background:rgba(15,118,110,.12)} }
 .cat-row-new td { animation: skum-newrow 2.4s ease; }
 .cat-tile-new   { animation: skum-newrow 2.4s ease; }
 
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
-}
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 680px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
-}
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
-}
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
-}
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px;
-    transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 62vh; }
 .skum-sec { padding: 20px 0; border-bottom: 1px solid #efece4; }
 .skum-sec:last-child { border-bottom: none; }
 .skum-sec-h { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -824,6 +876,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .skum-sec-t    { font-size: 13px; font-weight: 600; color: #1a1614; }
 .skum-sec-help { font-size: 12px; color: #76706a; }
 .skum-sec-opt  { font-size: 11px; color: #a39d96; background: #f6f5f1; padding: 1px 7px; border-radius: 10px; }
+.field-opt     { font-size: 10px; font-weight: 400; color: #a39d96; text-transform: none; letter-spacing: 0; }
 .skum-grid    { display: grid; gap: 14px; }
 .skum-grid-2  { grid-template-columns: 1fr 1fr; }
 .skum-grid-3  { grid-template-columns: 1fr 1fr 1fr; }
@@ -831,6 +884,7 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-lbl  { font-size: 11.5px; font-weight: 600; color: #3d3833; }
 .field-hint { font-size: 11px; color: #76706a; line-height: 1.4; }
+.field-err  { font-size: 11px; color: #b91c1c; font-weight: 500; line-height: 1.4; }
 .field input, .field textarea {
     border: 1px solid #e8e4db; border-radius: 7px; padding: 8px 11px;
     font-size: 13px; color: #1a1614; background: #fff; outline: none;
@@ -838,6 +892,13 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 }
 .field input:focus, .field textarea:focus {
     border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1);
+}
+.field input.field-bad, .field textarea.field-bad,
+.skum-money.field-bad, .skum-skubox.field-bad {
+    border-color: #dc2626;
+}
+.field input.field-bad:focus, .field textarea.field-bad:focus {
+    box-shadow: 0 0 0 3px rgba(220,38,38,.1);
 }
 .field textarea { resize: vertical; min-height: 72px; font-family: inherit; }
 .skum-domains { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -928,15 +989,10 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     transition: border-color .12s; cursor: pointer;
 }
 .skum-sel-wrap select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
+.skum-sel-wrap select:disabled { background: #fbfaf6; color: #a39d96; cursor: not-allowed; }
 .skum-sel-wrap svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px;
-    border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
+.skum-sel-wrap.field-bad select { border-color: #dc2626; }
+.skum-sel-wrap.field-bad select:focus { box-shadow: 0 0 0 3px rgba(220,38,38,.1); }
 .skum-ft-chip {
     font-size: 12px; background: #efece4; padding: 3px 9px;
     border-radius: 5px; color: #3d3833;

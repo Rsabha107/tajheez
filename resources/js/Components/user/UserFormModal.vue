@@ -4,6 +4,8 @@ import { useForm } from "@inertiajs/vue3";
 import axios from "axios";
 
 import UserFormFields from "@/Components/forms/UserFormFields.vue";
+import ProgressButton from "@/Pages/MaterialPlanning/components/ProgressButton.vue";
+import FormModal from "@/Pages/MaterialPlanning/components/FormModal.vue";
 
 const statuses = ref([]);
 const allRoles = ref([]);
@@ -150,21 +152,17 @@ function submit() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="rp-modal-overlay" @click.self="closeModal">
-      <div class="rp-modal-box">
-        <!-- Header -->
-        <div class="rp-modal-header">
-          <h5 class="rp-modal-title">
-            <i class="fa fa-user me-2 text-primary"></i>
-            {{ isEdit ? "Edit User" : "Add User" }}
-          </h5>
-          <button class="btn-close" @click="closeModal"></button>
-        </div>
+  <FormModal
+    :show="show"
+    :title="isEdit ? 'Edit User' : 'Add User'"
+    :subtitle="isEdit ? 'Update this user\'s details, roles and functional areas.' : 'Register a new user and assign their roles and functional areas.'"
+    @close="closeModal"
+  >
+    <template #eyebrow>
+      <span>Users</span>
+    </template>
 
-        <!-- Body -->
-        <div class="rp-modal-body">
-          <form id="user-form" @submit.prevent="submit">
+          <form id="user-form" class="rp-form" @submit.prevent="submit">
             <UserFormFields
               :form="form"
               :statuses="statuses"
@@ -178,13 +176,12 @@ function submit() {
                   Roles
                   <span class="badge-count">{{ form.role_ids.length }} selected</span>
                 </label>
-                <button
-                  type="button"
+                <ProgressButton
+                  variant="bootstrap"
                   class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+                  text="Clear all"
                   @click="form.role_ids = []"
-                >
-                  Clear all
-                </button>
+                />
               </div>
 
               <input
@@ -234,13 +231,12 @@ function submit() {
                   Functional Areas
                   <span class="badge-count">{{ form.functional_area_ids.length }} selected</span>
                 </label>
-                <button
-                  type="button"
+                <ProgressButton
+                  variant="bootstrap"
                   class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+                  text="Clear all"
                   @click="form.functional_area_ids = []"
-                >
-                  Clear all
-                </button>
+                />
               </div>
 
               <input
@@ -283,83 +279,24 @@ function submit() {
               </div>
             </div>
           </form>
-        </div>
 
-        <!-- Footer -->
-        <div class="rp-modal-footer">
-          <button type="button" class="btn btn-light" @click="closeModal">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="user-form"
-            class="btn btn-primary"
-            :disabled="form.processing"
-          >
-            <span
-              v-if="form.processing"
-              class="spinner-border spinner-border-sm me-1"
-            ></span>
-            {{ form.processing ? "Saving..." : isEdit ? "Update" : "Save" }}
-          </button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+    <template #footer-actions>
+      <ProgressButton
+        variant="primary"
+        color="#0f766e"
+        hover-color="#0d9488"
+        type="submit"
+        form="user-form"
+        :loading="form.processing"
+        :text="isEdit ? 'Update' : 'Save'"
+        loading-text="Saving..."
+      />
+    </template>
+  </FormModal>
 </template>
 
 <style scoped>
-.rp-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1050;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.rp-modal-box {
-  background: #fff;
-  border-radius: 18px;
-  width: 520px;
-  max-width: 95vw;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
-}
-
-.rp-modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid #eaecf6;
-  flex-shrink: 0;
-}
-
-.rp-modal-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.rp-modal-body {
-  padding: 1.25rem;
-  overflow-y: auto;
-  flex: 1 1 auto;
-}
-
-.rp-modal-footer {
-  padding: 1rem 1.25rem;
-  border-top: 1px solid #eaecf6;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
+.rp-form { padding: 20px 0; }
 
 .badge-count {
   display: inline-block;

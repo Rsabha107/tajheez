@@ -11,7 +11,7 @@ class Event extends Model
 {
     use HasFactory;
     protected $table = 'events';
-    protected $fillable = ['name', 'active_flag', 'event_logo', 'start_date', 'end_date'];
+    protected $fillable = ['name', 'code', 'active_flag', 'event_logo', 'start_date', 'end_date'];
     protected $casts = ['start_date' => 'date', 'end_date' => 'date'];
 
     // protected static function booted(){

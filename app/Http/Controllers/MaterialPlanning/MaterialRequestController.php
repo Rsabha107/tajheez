@@ -12,6 +12,7 @@ use App\Models\MaterialPlanning\RequestLine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class MaterialRequestController extends Controller
 {
@@ -45,8 +46,8 @@ class MaterialRequestController extends Controller
             'event_id' => ['required', 'exists:events,id'],
             'venue_id' => ['required', 'exists:venues,id'],
             'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
-            'area_id' => ['nullable', 'exists:mp_areas,id'],
-            'space_id' => ['nullable', 'exists:mp_spaces,id'],
+            'area_id' => ['nullable', Rule::exists('mp_areas', 'id')->where('event_id', $request->input('event_id'))],
+            'space_id' => ['nullable', Rule::exists('mp_spaces', 'id')->where('event_id', $request->input('event_id'))],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['nullable', 'string', 'max:120'],
@@ -82,13 +83,15 @@ class MaterialRequestController extends Controller
     {
         Gate::authorize('update', $materialRequest);
 
+        $eventId = $request->input('event_id', $materialRequest->event_id);
+
         $data = $request->validate([
             'title' => ['sometimes', 'nullable', 'string', 'max:200'],
             'event_id' => ['sometimes', 'exists:events,id'],
             'venue_id' => ['sometimes', 'exists:venues,id'],
             'functional_area_id' => ['nullable', 'exists:functional_areas,id'],
-            'area_id' => ['nullable', 'exists:mp_areas,id'],
-            'space_id' => ['nullable', 'exists:mp_spaces,id'],
+            'area_id' => ['nullable', Rule::exists('mp_areas', 'id')->where('event_id', $eventId)],
+            'space_id' => ['nullable', Rule::exists('mp_spaces', 'id')->where('event_id', $eventId)],
             'site_type' => ['nullable', 'string', 'max:80'],
             'site_code' => ['nullable', 'string', 'max:40'],
             'site_name' => ['sometimes', 'string', 'max:120'],
@@ -116,6 +119,13 @@ class MaterialRequestController extends Controller
         unset($data['layout_file']);
 
         $materialRequest->update($data);
+
+        // mp_request_lines.event_id is a denormalized copy (for direct
+        // analysis queries) of the parent request's event — keep it in sync
+        // on the rare path where a request's own event is reassigned.
+        if (array_key_exists('event_id', $data)) {
+            $materialRequest->lines()->update(['event_id' => $materialRequest->event_id]);
+        }
 
         return response()->json($this->present($materialRequest));
     }

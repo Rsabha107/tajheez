@@ -22,6 +22,7 @@ const props = defineProps({
     classifications: { type: Array, default: () => [] },
     permissions:   { type: Object, default: () => ({ isAdmin: false, managedDomain: null }) },
     showItemValues: { type: Boolean, default: false },
+    event:         { type: Object, default: () => ({ code: 'EVT' }) },
 });
 
 const emit = defineEmits(['go-to', 'refresh-detail']);
@@ -71,6 +72,16 @@ function domainOf(code) { return props.domains.find(d => d.code === code) || pro
 function venueOf(name)  { return props.venues.find(v => v.name === name || v.short_name === name) || props.venues[0]; }
 function fmtMoney(n)    { return '$' + Number(n || 0).toLocaleString('en-US'); }
 function catalogOf(sku) { return props.catalog.find(c => c.sku === sku); }
+
+// Service option bundles are event-scoped — narrow the pickers to the active
+// event (same as everywhere else); existing lines still resolve their own
+// bundle via serviceOption props on the line itself, unaffected by this.
+const eventServiceOptions = computed(() =>
+    props.event?.id ? props.serviceOptions.filter(o => o.eventId === props.event.id) : props.serviceOptions
+);
+const eventServiceOptionItems = computed(() =>
+    props.event?.id ? props.serviceOptionItems.filter(i => i.eventId === props.event.id) : props.serviceOptionItems
+);
 
 function fmtDate(s) {
     if (!s) return '—';
@@ -287,7 +298,7 @@ function avatarColor(name) {
                 :sku="assignTarget.sku"
                 :item-name="assignTarget.name"
                 :item-sub-group="assignTarget.sub"
-                :service-options="serviceOptions"
+                :service-options="eventServiceOptions"
                 :suppliers="suppliers"
                 :current-option-id="assignTarget.serviceOptionId"
                 :saving="assignSaving"
@@ -299,8 +310,9 @@ function avatarColor(name) {
 
             <NewBundleModal
                 v-if="assignTarget && creatingNewOption"
-                :service-option-items="serviceOptionItems"
+                :service-option-items="eventServiceOptionItems"
                 :classifications="classifications"
+                :event="event"
                 @close="closeAssign"
                 @add="onOptionCreated"
             />
@@ -310,7 +322,7 @@ function avatarColor(name) {
                 :request="detailRequest"
                 :lines="detailLines"
                 :domains="domains"
-                :service-options="serviceOptions"
+                :service-options="eventServiceOptions"
                 :suppliers="suppliers"
                 :people="people"
                 :show-item-values="showItemValues"

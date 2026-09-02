@@ -28,6 +28,16 @@ watch(() => props.requestLines, v => { itemsList.value = [...v]; });
 const eventItems = computed(() =>
     props.event?.id ? itemsList.value.filter(i => i.eventId === props.event.id) : itemsList.value
 );
+const eventServiceOptions = computed(() =>
+    props.event?.id ? props.serviceOptions.filter(o => o.eventId === props.event.id) : props.serviceOptions
+);
+// Venue filter is scoped to whichever venues are attached to the active
+// event; an event with none attached falls back to every venue.
+const eventVenues = computed(() =>
+    props.event?.venueIds?.length ? props.venues.filter(v => props.event.venueIds.includes(v.id)) : props.venues
+);
+const eventAreas = computed(() => props.event?.id ? props.areas.filter(a => a.eventId === props.event.id) : props.areas);
+const eventSpaces = computed(() => props.event?.id ? props.spaces.filter(s => s.eventId === props.event.id) : props.spaces);
 
 // ── Filters ───────────────────────────────────────────────────────────────────
 const q          = ref('');
@@ -63,8 +73,8 @@ const activeFilterChips = computed(() => {
     if (fVenue.value !== 'all') chips.push({ key: 'venue', label: `Venue: ${venueOf(fVenue.value)?.name ?? fVenue.value}`, remove: () => { fVenue.value = 'all'; } });
     if (fFA.value !== 'all') chips.push({ key: 'fa', label: `Functional Area: ${fFA.value}`, remove: () => { fFA.value = 'all'; } });
     if (fOwner.value !== 'all') chips.push({ key: 'owner', label: `Owner: ${personOf(fOwner.value)?.name ?? fOwner.value}`, remove: () => { fOwner.value = 'all'; } });
-    if (fArea.value !== 'all') chips.push({ key: 'area', label: `Area: ${props.areas.find(a => a.id === fArea.value)?.label ?? fArea.value}`, remove: () => { fArea.value = 'all'; } });
-    if (fSpace.value !== 'all') chips.push({ key: 'space', label: `Space: ${props.spaces.find(s => s.id === fSpace.value)?.name ?? fSpace.value}`, remove: () => { fSpace.value = 'all'; } });
+    if (fArea.value !== 'all') chips.push({ key: 'area', label: `Area: ${eventAreas.value.find(a => a.id === fArea.value)?.label ?? fArea.value}`, remove: () => { fArea.value = 'all'; } });
+    if (fSpace.value !== 'all') chips.push({ key: 'space', label: `Space: ${eventSpaces.value.find(s => s.id === fSpace.value)?.name ?? fSpace.value}`, remove: () => { fSpace.value = 'all'; } });
     if (fGroup.value !== 'all') chips.push({ key: 'group', label: `Group: ${fGroup.value}`, remove: () => { fGroup.value = 'all'; } });
     if (fSub.value !== 'all') chips.push({ key: 'sub', label: `Subgroup: ${fSub.value}`, remove: () => { fSub.value = 'all'; } });
     if (moveInFrom.value || moveInTo.value) chips.push({ key: 'movein', label: `Move-in: ${moveInFrom.value || '…'} → ${moveInTo.value || '…'}`, remove: () => { moveInFrom.value = ''; moveInTo.value = ''; } });
@@ -201,21 +211,21 @@ async function bulkAssign(serviceOptionId) {
                         <label>Venue</label>
                         <select v-model="fVenue">
                             <option value="all">All venues</option>
-                            <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
+                            <option v-for="v in eventVenues" :key="v.code" :value="v.code">{{ v.name }}</option>
                         </select>
                     </div>
                     <div class="fp-field">
                         <label>Area</label>
                         <select v-model="fArea">
                             <option value="all">All</option>
-                            <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.label }}</option>
+                            <option v-for="a in eventAreas" :key="a.id" :value="a.id">{{ a.label }}</option>
                         </select>
                     </div>
                     <div class="fp-field">
                         <label>Space</label>
                         <select v-model="fSpace">
                             <option value="all">All</option>
-                            <option v-for="s in spaces" :key="s.id" :value="s.id">{{ s.name }}</option>
+                            <option v-for="s in eventSpaces" :key="s.id" :value="s.id">{{ s.name }}</option>
                         </select>
                     </div>
                 </div>
@@ -376,7 +386,7 @@ async function bulkAssign(serviceOptionId) {
         v-if="showBulkAssign"
         :count="selectedIds.size"
         :item-sub-groups="selectedSubGroups"
-        :service-options="serviceOptions"
+        :service-options="eventServiceOptions"
         :suppliers="suppliers"
         :saving="bulkSaving"
         :error="bulkError"

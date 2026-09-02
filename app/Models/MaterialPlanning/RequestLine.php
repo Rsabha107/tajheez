@@ -2,6 +2,7 @@
 
 namespace App\Models\MaterialPlanning;
 
+use App\Models\Ems\Event;
 use Illuminate\Database\Eloquent\Model;
 
 class RequestLine extends Model
@@ -13,6 +14,11 @@ class RequestLine extends Model
     public function request()
     {
         return $this->belongsTo(MaterialRequest::class, 'request_id');
+    }
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class, 'event_id');
     }
 
     public function catalogItem()

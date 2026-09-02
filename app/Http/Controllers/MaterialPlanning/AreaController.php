@@ -22,6 +22,7 @@ class AreaController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'max:20', 'regex:/^[A-Z0-9_]+$/', 'unique:mp_areas,code'],
+            'event_id' => ['required', 'exists:events,id'],
             'label' => ['required', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -40,6 +41,7 @@ class AreaController extends Controller
         Gate::authorize('update', $area);
 
         $data = $request->validate([
+            'event_id' => ['sometimes', 'exists:events,id'],
             'label' => ['sometimes', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
@@ -65,6 +67,7 @@ class AreaController extends Controller
         return [
             'id' => $area->id,
             'code' => $area->code,
+            'eventId' => $area->event_id,
             'label' => $area->label,
             'description' => $area->description,
             'sortOrder' => $area->sort_order,

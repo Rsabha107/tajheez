@@ -22,6 +22,7 @@ class DomainController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'max:8', 'regex:/^[A-Z0-9_]+$/', 'unique:mp_domains,code'],
+            'event_id' => ['required', 'exists:events,id'],
             'label' => ['required', 'string', 'max:50'],
             'color' => ['required', 'string', 'max:9'],
             'chip' => ['required', 'string', 'max:9'],
@@ -42,6 +43,7 @@ class DomainController extends Controller
         Gate::authorize('update', $domain);
 
         $data = $request->validate([
+            'event_id' => ['sometimes', 'exists:events,id'],
             'label' => ['sometimes', 'string', 'max:50'],
             'color' => ['sometimes', 'string', 'max:9'],
             'chip' => ['sometimes', 'string', 'max:9'],
@@ -59,6 +61,21 @@ class DomainController extends Controller
     {
         Gate::authorize('delete', $domain);
 
+        // mp_item_groups/mp_catalog_items both FK-restrict on domain_id,
+        // so check usage up front rather than letting the delete fail with a bare 500.
+        $itemGroupLabels = $domain->itemGroups()->orderBy('label')->pluck('label');
+        $catalogItemSkus = $domain->catalogItems()->orderBy('sku')->pluck('sku');
+
+        if ($itemGroupLabels->isNotEmpty() || $catalogItemSkus->isNotEmpty()) {
+            return response()->json([
+                'message' => "This domain is still in use and can't be removed.",
+                'usage' => [
+                    'itemGroups' => $itemGroupLabels->values()->all(),
+                    'catalogItems' => $catalogItemSkus->values()->all(),
+                ],
+            ], 422);
+        }
+
         $domain->delete();
 
         return response()->json(['message' => 'Domain deleted successfully.']);
@@ -69,6 +86,7 @@ class DomainController extends Controller
         return [
             'id' => $domain->id,
             'code' => $domain->code,
+            'eventId' => $domain->event_id,
             'label' => $domain->label,
             'color' => $domain->color,
             'chip' => $domain->chip,

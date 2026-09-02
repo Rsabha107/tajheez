@@ -3,6 +3,7 @@
 namespace App\Models\MaterialPlanning;
 
 use App\Models\Classification;
+use App\Models\Ems\Event;
 use App\Models\GlobalStatus;
 use Illuminate\Database\Eloquent\Model;
 
@@ -13,6 +14,11 @@ class ServiceOption extends Model
     protected $casts = [
         'is_default' => 'boolean',
     ];
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class, 'event_id');
+    }
 
     public function services()
     {

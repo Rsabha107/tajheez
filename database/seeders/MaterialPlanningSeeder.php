@@ -103,6 +103,7 @@ class MaterialPlanningSeeder extends Seeder
             ['code' => 'FFE', 'label' => 'FF&E',      'color' => '#6b21a8', 'chip' => '#ede9fe', 'description' => 'Furniture, fittings & equipment', 'sort_order' => 5],
         ];
         foreach ($rows as $row) {
+            $row['event_id'] = self::EVENT_ID;
             Domain::updateOrCreate(['code' => $row['code']], $row);
         }
     }
@@ -117,6 +118,7 @@ class MaterialPlanningSeeder extends Seeder
             ['code' => 'WORKFORCE',  'label' => 'Workforce',   'description' => 'Volunteers, staff and accreditation',         'sort_order' => 5],
         ];
         foreach ($areas as $row) {
+            $row['event_id'] = self::EVENT_ID;
             Area::updateOrCreate(['code' => $row['code']], $row);
         }
         $areasByCode = Area::pluck('id', 'code');
@@ -138,6 +140,7 @@ class MaterialPlanningSeeder extends Seeder
             $areaCode = $row['area_code'];
             unset($row['area_code']);
             $row['area_id'] = $areasByCode[$areaCode];
+            $row['event_id'] = self::EVENT_ID;
             Space::updateOrCreate(['code' => $row['code']], $row);
         }
     }
@@ -173,6 +176,7 @@ class MaterialPlanningSeeder extends Seeder
             $domainCode = $row['domain'];
             unset($row['domain']);
             $row['domain_id'] = $domainsByCode[$domainCode];
+            $row['event_id'] = self::EVENT_ID;
             $group = ItemGroup::updateOrCreate(['code' => $row['code']], $row);
             $groupIds[$group->code] = $group->id;
         }
@@ -203,6 +207,7 @@ class MaterialPlanningSeeder extends Seeder
             $groupCode = $row['group'];
             unset($row['group']);
             $row['group_id'] = $groupIds[$groupCode];
+            $row['event_id'] = self::EVENT_ID;
             ItemSubgroup::updateOrCreate(['code' => $row['code']], $row);
         }
     }
@@ -242,6 +247,7 @@ class MaterialPlanningSeeder extends Seeder
             $domainCode = $row['domain_code'];
             unset($row['domain_code']);
             $row['domain_id'] = $domainsByCode[$domainCode];
+            $row['event_id'] = self::EVENT_ID;
             $items[$row['sku']] = CatalogItem::updateOrCreate(['sku' => $row['sku']], $row);
         }
         return $items;
@@ -306,10 +312,25 @@ class MaterialPlanningSeeder extends Seeder
         $suppliersByCode = Supplier::pluck('id', 'code');
         $classificationByStatus = ['preferred' => 1, 'active' => 2, 'suspended' => 3];
 
+        // Item groups/subgroups mirror the catalog's group/sub text exactly
+        // (see seedItemGroupsAndSubgroups()) — resolve each row's real
+        // classification from its catalog SKU rather than leaving it unset.
+        $catalogBySku = CatalogItem::all()->keyBy('sku');
+        $groupIdByLabel = ItemGroup::pluck('id', 'label');
+        $subgroupIdByName = ItemSubgroup::pluck('id', 'name');
+        // A seed row's catalog SKU may no longer exist (e.g. deleted via the
+        // Catalog UI) — fall back to the same "Uncategorized" catch-all used
+        // to backfill legacy rows, rather than guessing a specific domain.
+        $fallbackGroupId = ItemGroup::where('code', 'UNCATEGORIZED')->value('id') ?? $groupIdByLabel->first();
+        $fallbackSubgroupId = ItemSubgroup::where('code', 'UNCATEGORIZED')->value('id') ?? $subgroupIdByName->first();
+
         $itemsByCode = [];
         foreach ($rows as $row) {
+            $catalogItem = $catalogBySku[$row['sku']] ?? null;
+
             $itemsByCode[$row['code']] = ServiceOptionItem::updateOrCreate(['code' => $row['code']], [
                 'name' => $row['name'],
+                'event_id' => self::EVENT_ID,
                 'supplier_id' => $suppliersByCode[$row['supplier_code']],
                 'cost' => $row['cost'],
                 'lead_days' => $row['lead_days'],
@@ -317,33 +338,47 @@ class MaterialPlanningSeeder extends Seeder
                 'capacity' => $row['capacity'],
                 'contract_reference' => $row['contract_reference'],
                 'spec' => $row['spec'],
+                'item_group_id' => $groupIdByLabel[$catalogItem?->group] ?? $fallbackGroupId,
+                'item_subgroup_id' => $subgroupIdByName[$catalogItem?->sub] ?? $fallbackSubgroupId,
             ]);
         }
 
         foreach ($rows as $row) {
-            $bundle = ServiceOption::updateOrCreate(['code' => $row['code']], [
+            $item = $itemsByCode[$row['code']];
+
+            // Bundle codes use their own "BNDL-" namespace, distinct from the
+            // reusable item they wrap (SO-BND-... in the seed rows' scheme).
+            $bundle = ServiceOption::updateOrCreate(['code' => 'BNDL-' . substr($row['code'], 3)], [
                 'name' => $row['name'],
+                'event_id' => self::EVENT_ID,
                 'classification_id' => $classificationByStatus[$row['status']],
                 'status_id' => 1,
                 'is_default' => $row['is_default'] ?? false,
+                'item_group_id' => $item->item_group_id,
+                'item_subgroup_id' => $item->item_subgroup_id,
             ]);
 
-            $bundle->services()->sync([$itemsByCode[$row['code']]->id => ['sort_order' => 0]]);
+            $bundle->services()->sync([$item->id => ['sort_order' => 0]]);
         }
 
         // A few bundles that combine more than one reusable item, so the
         // library's reuse/usage-count feature has real data to show.
         $combos = [
-            ['code' => 'SO-BND-NET01', 'name' => 'Vodafone network package (Wi-Fi + fiber)',  'status' => 'preferred', 'items' => ['SO-0450-VOD', 'SO-0460-VOD']],
-            ['code' => 'SO-BND-PWR01', 'name' => 'Aggreko power + GES structure',              'status' => 'active',    'items' => ['SO-0500-AGG', 'SO-1010-GES']],
-            ['code' => 'SO-BND-LNG01', 'name' => 'GES lounge + flooring package',              'status' => 'active',    'items' => ['SO-0101-GES', 'SO-0420-GES']],
+            ['code' => 'BNDL-BND-NET01', 'name' => 'Vodafone network package (Wi-Fi + fiber)',  'status' => 'preferred', 'items' => ['SO-0450-VOD', 'SO-0460-VOD']],
+            ['code' => 'BNDL-BND-PWR01', 'name' => 'Aggreko power + GES structure',              'status' => 'active',    'items' => ['SO-0500-AGG', 'SO-1010-GES']],
+            ['code' => 'BNDL-BND-LNG01', 'name' => 'GES lounge + flooring package',              'status' => 'active',    'items' => ['SO-0101-GES', 'SO-0420-GES']],
         ];
         foreach ($combos as $combo) {
+            $firstItem = $itemsByCode[$combo['items'][0]];
+
             $bundle = ServiceOption::updateOrCreate(['code' => $combo['code']], [
                 'name' => $combo['name'],
+                'event_id' => self::EVENT_ID,
                 'classification_id' => $classificationByStatus[$combo['status']],
                 'status_id' => 1,
                 'is_default' => false,
+                'item_group_id' => $firstItem->item_group_id,
+                'item_subgroup_id' => $firstItem->item_subgroup_id,
             ]);
 
             $pivot = [];

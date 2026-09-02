@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\ServiceOption;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class ServiceOptionController extends Controller
 {
@@ -20,15 +21,17 @@ class ServiceOptionController extends Controller
 
         $data = $request->validate(array_merge([
             'name' => ['required', 'string', 'max:180'],
+            'event_id' => ['required', 'exists:events,id'],
             'classification_id' => ['nullable', 'exists:classifications,id'],
             'status_id' => ['nullable', 'exists:global_statuses,id'],
             'is_default' => ['nullable', 'boolean'],
-            'item_group_id' => ['nullable', 'exists:mp_item_groups,id'],
-            'item_subgroup_id' => ['nullable', 'exists:mp_item_subgroups,id'],
+            'item_group_id' => ['required', Rule::exists('mp_item_groups', 'id')->where('event_id', $request->input('event_id'))],
+            'item_subgroup_id' => ['required', Rule::exists('mp_item_subgroups', 'id')->where('event_id', $request->input('event_id'))],
         ], self::ITEM_RULES));
 
         $option = ServiceOption::create([
             'code' => $this->generateCode($data['name']),
+            'event_id' => $data['event_id'],
             'name' => $data['name'],
             'classification_id' => $data['classification_id'] ?? 2,
             'status_id' => $data['status_id'] ?? 1,
@@ -46,13 +49,16 @@ class ServiceOptionController extends Controller
     {
         Gate::authorize('update', $serviceOption);
 
+        $eventId = $request->input('event_id', $serviceOption->event_id);
+
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:180'],
+            'event_id' => ['sometimes', 'exists:events,id'],
             'classification_id' => ['sometimes', 'exists:classifications,id'],
             'status_id' => ['sometimes', 'exists:global_statuses,id'],
             'is_default' => ['sometimes', 'boolean'],
-            'item_group_id' => ['nullable', 'exists:mp_item_groups,id'],
-            'item_subgroup_id' => ['nullable', 'exists:mp_item_subgroups,id'],
+            'item_group_id' => ['sometimes', Rule::exists('mp_item_groups', 'id')->where('event_id', $eventId)],
+            'item_subgroup_id' => ['sometimes', Rule::exists('mp_item_subgroups', 'id')->where('event_id', $eventId)],
             'service_option_item_ids' => ['sometimes', 'array', 'min:1'],
             'service_option_item_ids.*' => ['integer', 'exists:mp_service_option_items,id'],
         ]);
@@ -94,13 +100,13 @@ class ServiceOptionController extends Controller
         $nameTail = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 6)) ?: 'SVC';
 
         for ($attempt = 0; $attempt < 10; $attempt++) {
-            $code = sprintf('SO-%s-%d', $nameTail, random_int(100, 999));
+            $code = sprintf('BNDL-%s-%d', $nameTail, random_int(100, 999));
             if (! ServiceOption::where('code', $code)->exists()) {
                 return $code;
             }
         }
 
-        return sprintf('SO-%s-%d', $nameTail, random_int(1000, 9999));
+        return sprintf('BNDL-%s-%d', $nameTail, random_int(1000, 9999));
     }
 
     /** Shape matches the mock service-option row exactly (id = code), for drop-in frontend compatibility. */
@@ -111,6 +117,7 @@ class ServiceOptionController extends Controller
         return [
             'id' => $option->code,
             'dbId' => $option->id,
+            'eventId' => $option->event_id,
             'name' => $option->name,
             'cost' => (float) $services->sum('cost'),
             'lead' => (int) $services->max('lead_days'),

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MaterialPlanning\ItemGroup;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class ItemGroupController extends Controller
 {
@@ -22,7 +23,8 @@ class ItemGroupController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'max:20', 'regex:/^[A-Z0-9_]+$/', 'unique:mp_item_groups,code'],
-            'domain_id' => ['required', 'exists:mp_domains,id'],
+            'event_id' => ['required', 'exists:events,id'],
+            'domain_id' => ['required', Rule::exists('mp_domains', 'id')->where('event_id', $request->input('event_id'))],
             'label' => ['required', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -40,8 +42,11 @@ class ItemGroupController extends Controller
     {
         Gate::authorize('update', $itemGroup);
 
+        $eventId = $request->input('event_id', $itemGroup->event_id);
+
         $data = $request->validate([
-            'domain_id' => ['sometimes', 'exists:mp_domains,id'],
+            'event_id' => ['sometimes', 'exists:events,id'],
+            'domain_id' => ['sometimes', Rule::exists('mp_domains', 'id')->where('event_id', $eventId)],
             'label' => ['sometimes', 'string', 'max:80'],
             'description' => ['nullable', 'string', 'max:255'],
             'sort_order' => ['sometimes', 'integer', 'min:0'],
@@ -67,6 +72,7 @@ class ItemGroupController extends Controller
         return [
             'id' => $itemGroup->id,
             'code' => $itemGroup->code,
+            'eventId' => $itemGroup->event_id,
             'domain' => $itemGroup->domain_id,
             'domainLabel' => $itemGroup->domain?->label,
             'label' => $itemGroup->label,

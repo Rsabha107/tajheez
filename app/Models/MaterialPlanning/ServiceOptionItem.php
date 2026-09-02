@@ -2,6 +2,7 @@
 
 namespace App\Models\MaterialPlanning;
 
+use App\Models\Ems\Event;
 use Illuminate\Database\Eloquent\Model;
 
 class ServiceOptionItem extends Model
@@ -11,6 +12,11 @@ class ServiceOptionItem extends Model
     protected $casts = [
         'cost' => 'decimal:2',
     ];
+
+    public function event()
+    {
+        return $this->belongsTo(Event::class, 'event_id');
+    }
 
     public function bundles()
     {

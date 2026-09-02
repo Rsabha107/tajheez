@@ -28,6 +28,14 @@ const eventChangeOrders = computed(() =>
 const eventRequests = computed(() =>
     props.event?.id ? props.requests.filter(r => r.eventId === props.event.id) : props.requests
 );
+// Venue filter is scoped to whichever venues are attached to the active
+// event; an event with none attached falls back to every venue.
+const eventVenues = computed(() =>
+    props.event?.venueIds?.length ? props.venues.filter(v => props.event.venueIds.includes(v.id)) : props.venues
+);
+const eventDomains = computed(() =>
+    props.event?.id ? props.domains.filter(d => d.eventId === props.event.id) : props.domains
+);
 
 const reasons = computed(() => [...new Set(eventChangeOrders.value.map(r => r.reason))]);
 
@@ -52,7 +60,7 @@ const baseline = computed(() => eventRequests.value.reduce((s, r) => s + r.value
 const driftPct = computed(() => baseline.value ? (appliedDrift.value / baseline.value) * 100 : 0);
 
 const byDomain = computed(() => {
-    const rows = props.domains.map(d => ({
+    const rows = eventDomains.value.map(d => ({
         ...d,
         v: eventChangeOrders.value.filter(r => r.state === 'approved' && r.domain === d.code).reduce((s, r) => s + r.delta, 0),
     })).filter(x => x.v !== 0);
@@ -61,7 +69,7 @@ const byDomain = computed(() => {
 const maxAbs = computed(() => Math.max(1, ...byDomain.value.map(x => Math.abs(x.v))));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function domainOf(code)  { return props.domains.find(d => d.code === code) || props.domains[0]; }
+function domainOf(code)  { return eventDomains.value.find(d => d.code === code) || eventDomains.value[0]; }
 function venueOf(code) { return props.venues.find(v => v.code === code) || props.venues[0]; }
 function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 function fmtDelta(v)   { return v === 0 ? '—' : (v > 0 ? '+' : '−') + fmtMoney(Math.abs(v)); }
@@ -134,14 +142,14 @@ function avatarColor(initials) {
                 <label>Domain</label>
                 <select v-model="domain">
                     <option value="all">All</option>
-                    <option v-for="d in domains" :key="d.id" :value="d.code">{{ d.label }}</option>
+                    <option v-for="d in eventDomains" :key="d.id" :value="d.code">{{ d.label }}</option>
                 </select>
             </div>
             <div class="fb-sel">
                 <label>Venue</label>
                 <select v-model="venue">
                     <option value="all">All venues</option>
-                    <option v-for="v in venues" :key="v.code" :value="v.code">{{ v.name }}</option>
+                    <option v-for="v in eventVenues" :key="v.code" :value="v.code">{{ v.name }}</option>
                 </select>
             </div>
             <div class="fb-sel">

@@ -1,7 +1,9 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import axios from 'axios';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import FormModal from '../components/FormModal.vue';
+import ProgressButton from '../components/ProgressButton.vue';
 
 const props = defineProps({
     suppliers:       Array,
@@ -141,9 +143,6 @@ async function confirmDelete() {
     }
 }
 
-function onEsc(e) { if (e.key === 'Escape' && showAdd.value) closeAdd(); }
-onMounted(()   => document.addEventListener('keydown', onEsc));
-onUnmounted(() => document.removeEventListener('keydown', onEsc));
 </script>
 
 <template>
@@ -238,82 +237,77 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
     </div>
 
     <!-- ── New supplier modal ──────────────────────────────────────────────── -->
-    <Teleport to="body" v-if="showAdd">
-        <div class="skum-scrim" @click.self="closeAdd">
-            <div class="skum" role="dialog" aria-modal="true">
-                <header class="skum-hd">
-                    <div class="skum-hd-l">
-                        <div class="skum-hd-tag"><span class="mono">{{ event.code }}</span><span>·</span><span>Suppliers</span></div>
-                        <h2 class="skum-title">{{ editingId ? 'Edit supplier' : 'New supplier' }}</h2>
-                        <p class="skum-sub">Register a framework supplier that can back a catalog item's service options.</p>
-                    </div>
-                    <button class="skum-x" @click="closeAdd" aria-label="Close">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                    </button>
-                </header>
+    <FormModal
+        :show="showAdd"
+        max-width="560px"
+        :title="editingId ? 'Edit supplier' : 'New supplier'"
+        subtitle="Register a framework supplier that can back a catalog item's service options."
+        @close="closeAdd"
+    >
+        <template #eyebrow>
+            <span class="mono">{{ event.code }}</span><span>·</span><span>Suppliers</span>
+        </template>
 
-                <div class="skum-body">
-                    <section class="skum-sec">
-                        <div class="form-grid">
-                            <div class="field" style="grid-column: span 2">
-                                <label class="field-lbl">Name</label>
-                                <input v-model="form.name" placeholder="e.g. Acme Event Services"/>
-                                <span class="field-hint">Code is generated automatically from the name.</span>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Kind</label>
-                                <input v-model="form.kind" placeholder="e.g. Overlay & furniture"/>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">MSA reference</label>
-                                <input v-model="form.msa" placeholder="optional"/>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Classification</label>
-                                <div class="sel">
-                                    <select v-model="form.classification">
-                                        <option v-for="c in classifications" :key="c.id" :value="c.id">{{ c.name }}</option>
-                                    </select>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Status</label>
-                                <div class="sel">
-                                    <select v-model="form.status">
-                                        <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.name }}</option>
-                                    </select>
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
-                                </div>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Contact name</label>
-                                <input v-model="form.contactName" placeholder="optional"/>
-                            </div>
-                            <div class="field">
-                                <label class="field-lbl">Contact phone</label>
-                                <input v-model="form.contactPhone" placeholder="optional"/>
-                            </div>
-                        </div>
-                    </section>
+        <section class="skum-sec">
+            <div class="form-grid">
+                <div class="field" style="grid-column: span 2">
+                    <label class="field-lbl">Name</label>
+                    <input v-model="form.name" placeholder="e.g. Acme Event Services"/>
+                    <span class="field-hint">Code is generated automatically from the name.</span>
                 </div>
-
-                <footer class="skum-ft">
-                    <div class="skum-ft-l">
-                        <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
-                        <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
-                        <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Name and kind are required</span>
+                <div class="field">
+                    <label class="field-lbl">Kind</label>
+                    <input v-model="form.kind" placeholder="e.g. Overlay & furniture"/>
+                </div>
+                <div class="field">
+                    <label class="field-lbl">MSA reference</label>
+                    <input v-model="form.msa" placeholder="optional"/>
+                </div>
+                <div class="field">
+                    <label class="field-lbl">Classification</label>
+                    <div class="sel">
+                        <select v-model="form.classification">
+                            <option v-for="c in classifications" :key="c.id" :value="c.id">{{ c.name }}</option>
+                        </select>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                     </div>
-                    <div class="skum-ft-r">
-                        <button class="mp-btn" @click="closeAdd">Cancel</button>
-                        <button class="mp-btn mp-btn-primary" :disabled="!formValid || saving" @click="submitSupplier">
-                            {{ saving ? (editingId ? 'Saving…' : 'Adding…') : (editingId ? 'Save changes' : 'Add supplier') }}
-                        </button>
+                </div>
+                <div class="field">
+                    <label class="field-lbl">Status</label>
+                    <div class="sel">
+                        <select v-model="form.status">
+                            <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.name }}</option>
+                        </select>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
                     </div>
-                </footer>
+                </div>
+                <div class="field">
+                    <label class="field-lbl">Contact name</label>
+                    <input v-model="form.contactName" placeholder="optional"/>
+                </div>
+                <div class="field">
+                    <label class="field-lbl">Contact phone</label>
+                    <input v-model="form.contactPhone" placeholder="optional"/>
+                </div>
             </div>
-        </div>
-    </Teleport>
+        </section>
+
+        <template #footer-left>
+            <span v-if="error" class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>{{ error }}</span>
+            <span v-else-if="formValid" class="skum-ft-ok"><span class="skum-ft-dot" style="background:#16a34a"></span>Ready to add</span>
+            <span v-else class="skum-ft-warn"><span class="skum-ft-dot" style="background:#b45309"></span>Name and kind are required</span>
+        </template>
+        <template #footer-actions>
+            <ProgressButton
+                variant="primary"
+                :disabled="!formValid"
+                :loading="saving"
+                :text="editingId ? 'Save changes' : 'Add supplier'"
+                :loading-text="editingId ? 'Saving…' : 'Adding…'"
+                @click="submitSupplier"
+            />
+        </template>
+    </FormModal>
 
     <ConfirmModal
         v-if="confirmDeleteRow"
@@ -417,43 +411,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .mp-icon-del:hover { background: #ffe4e6; }
 .cfm-err { font-size: 12.5px; color: #991b1b; margin-top: 8px; }
 
-/* ── Modal shell ──────────────────────────────────────────────────────────── */
-@keyframes skum-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes skum-pop  { from { opacity: 0; transform: translateY(14px) scale(.97); } to { opacity: 1; transform: none; } }
-.skum-scrim {
-    position: fixed; inset: 0; z-index: 1000;
-    background: rgba(26,22,20,.45);
-    display: flex; align-items: flex-start; justify-content: center;
-    padding: 40px 16px; overflow-y: auto;
-    animation: skum-fade .18s ease;
-}
-.skum {
-    background: #fff; border: 1px solid #e8e4db; border-radius: 14px;
-    width: 100%; max-width: 560px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.18);
-    animation: skum-pop .22s cubic-bezier(.34,1.3,.64,1);
-    display: flex; flex-direction: column;
-}
-.skum-hd {
-    display: flex; align-items: flex-start; justify-content: space-between;
-    padding: 22px 24px 18px; border-bottom: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 13px 13px 0 0;
-}
-.skum-hd-tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; color: #76706a; margin-bottom: 6px;
-    background: #efece4; padding: 2px 8px; border-radius: 20px;
-}
-.skum-title { font-size: 17px; font-weight: 700; color: #1a1614; margin: 0 0 4px; }
-.skum-sub   { font-size: 12.5px; color: #76706a; margin: 0; line-height: 1.5; }
-.skum-x {
-    width: 30px; height: 30px; border-radius: 7px;
-    border: 1px solid #e8e4db; background: #fff;
-    display: inline-flex; align-items: center; justify-content: center;
-    cursor: pointer; color: #76706a; flex-shrink: 0; margin-left: 12px; transition: background .12s;
-}
-.skum-x:hover { background: #f6f5f1; }
-.skum-body { padding: 0 24px; overflow-y: auto; max-height: 62vh; }
 .skum-sec { padding: 20px 0; }
 
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -474,13 +431,6 @@ onUnmounted(() => document.removeEventListener('keydown', onEsc));
 .sel select:focus { border-color: #0f766e; box-shadow: 0 0 0 3px rgba(15,118,110,.1); }
 .sel svg { position: absolute; right: 10px; pointer-events: none; color: #76706a; }
 
-.skum-ft {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 16px 24px; border-top: 1px solid #e8e4db;
-    background: #fbfaf6; border-radius: 0 0 13px 13px;
-}
-.skum-ft-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.skum-ft-r { display: flex; gap: 8px; flex-shrink: 0; }
 .skum-ft-ok, .skum-ft-warn { display: flex; align-items: center; gap: 5px; font-size: 12px; }
 .skum-ft-ok   { color: #16a34a; }
 .skum-ft-warn { color: #b45309; }

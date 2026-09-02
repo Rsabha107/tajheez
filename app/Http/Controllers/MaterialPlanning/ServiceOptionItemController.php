@@ -7,32 +7,36 @@ use App\Models\MaterialPlanning\ServiceOptionItem;
 use App\Models\MaterialPlanning\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 
 class ServiceOptionItemController extends Controller
 {
     private const RULES = [
         'name' => ['required', 'string', 'max:180'],
-        'supplier_code' => ['required', 'exists:mp_suppliers,code'],
+        'event_id' => ['required', 'exists:events,id'],
+        'supplier_code' => ['nullable', 'exists:mp_suppliers,code'],
         'cost' => ['required', 'numeric', 'min:0'],
         'lead_days' => ['nullable', 'integer', 'min:0'],
         'sla' => ['nullable', 'string', 'max:120'],
         'capacity' => ['nullable', 'integer', 'min:0'],
         'contract_reference' => ['nullable', 'string', 'max:60'],
         'spec' => ['nullable', 'string'],
-        'item_group_id' => ['nullable', 'exists:mp_item_groups,id'],
-        'item_subgroup_id' => ['nullable', 'exists:mp_item_subgroups,id'],
     ];
 
     public function store(Request $request)
     {
         Gate::authorize('create', ServiceOptionItem::class);
 
-        $data = $request->validate(self::RULES);
+        $data = $request->validate(array_merge(self::RULES, [
+            'item_group_id' => ['required', Rule::exists('mp_item_groups', 'id')->where('event_id', $request->input('event_id'))],
+            'item_subgroup_id' => ['required', Rule::exists('mp_item_subgroups', 'id')->where('event_id', $request->input('event_id'))],
+        ]));
 
         $item = ServiceOptionItem::create([
             'code' => $this->generateCode($data['name']),
+            'event_id' => $data['event_id'],
             'name' => $data['name'],
-            'supplier_id' => Supplier::where('code', $data['supplier_code'])->value('id'),
+            'supplier_id' => !empty($data['supplier_code']) ? Supplier::where('code', $data['supplier_code'])->value('id') : null,
             'cost' => $data['cost'],
             'lead_days' => $data['lead_days'] ?? 0,
             'sla' => $data['sla'] ?? '',
@@ -50,14 +54,22 @@ class ServiceOptionItemController extends Controller
     {
         Gate::authorize('update', $serviceOptionItem);
 
-        $data = $request->validate(array_map(
-            fn ($rules) => array_map(fn ($r) => $r === 'required' ? 'sometimes' : $r, $rules),
-            self::RULES
+        $eventId = $request->input('event_id', $serviceOptionItem->event_id);
+
+        $data = $request->validate(array_merge(
+            array_map(
+                fn ($rules) => array_map(fn ($r) => $r === 'required' ? 'sometimes' : $r, $rules),
+                self::RULES
+            ),
+            [
+                'item_group_id' => ['sometimes', Rule::exists('mp_item_groups', 'id')->where('event_id', $eventId)],
+                'item_subgroup_id' => ['sometimes', Rule::exists('mp_item_subgroups', 'id')->where('event_id', $eventId)],
+            ]
         ));
 
         $update = $data;
         if (array_key_exists('supplier_code', $data)) {
-            $update['supplier_id'] = Supplier::where('code', $data['supplier_code'])->value('id');
+            $update['supplier_id'] = !empty($data['supplier_code']) ? Supplier::where('code', $data['supplier_code'])->value('id') : null;
         }
         unset($update['supplier_code']);
 
@@ -95,6 +107,7 @@ class ServiceOptionItemController extends Controller
         return [
             'id' => $item->code,
             'dbId' => $item->id,
+            'eventId' => $item->event_id,
             'name' => $item->name,
             'supplierCode' => $item->supplier_code,
             'supplierName' => $item->supplier?->name,

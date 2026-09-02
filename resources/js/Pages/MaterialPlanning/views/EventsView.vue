@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import EventFormModal from '@/Components/ems/EventFormModal.vue';
+import ProgressButton from '../components/ProgressButton.vue';
 
 // ── Local state ───────────────────────────────────────────────────────────────
 const eventsRows         = ref([]);
@@ -14,6 +15,7 @@ const showEventModal     = ref(false);
 const eventModalMode     = ref('create');
 const selectedEventRow   = ref(null);
 const refreshing         = ref(false);
+const deletingEventId    = ref(null);
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const eventsStatusOptions = computed(() => {
@@ -33,7 +35,7 @@ const filteredEvents = computed(() => {
     if (eventsStatusFilter.value !== 'all') rows = rows.filter(e => e.status_color === eventsStatusFilter.value);
     if (eventsVenueFilter.value  !== 'all') rows = rows.filter(e => (e.venues ?? []).some(v => v.id == eventsVenueFilter.value));
     const q = eventsSearch.value.toLowerCase();
-    if (q) rows = rows.filter(e => e.name?.toLowerCase().includes(q));
+    if (q) rows = rows.filter(e => e.name?.toLowerCase().includes(q) || e.code?.toLowerCase().includes(q));
     return rows;
 });
 
@@ -81,7 +83,8 @@ function closeEventModal() { showEventModal.value = false; selectedEventRow.valu
 async function deleteEvent(row) {
     const result = await Swal.fire({ title: 'Delete event?', text: `"${row.name}"`, icon: 'warning', showCancelButton: true, confirmButtonText: 'Yes, delete', confirmButtonColor: '#dc2626' });
     if (!result.isConfirmed) return;
-    try { await axios.delete(route('events.destroy', row.id)); fetchEvents(); } catch (_) {}
+    deletingEventId.value = row.id;
+    try { await axios.delete(route('events.destroy', row.id)); await fetchEvents(); } catch (_) {} finally { deletingEventId.value = null; }
 }
 
 onMounted(fetchEvents);
@@ -95,13 +98,13 @@ onMounted(fetchEvents);
                 <p class="mp-page-sub">All events in the system. Click a row to edit.</p>
             </div>
             <div class="mp-head-actions">
-                <button class="mp-btn mp-btn-icon" title="Refresh table" @click="refreshTable">
-                    <svg :class="{ 'spin': refreshing }" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <ProgressButton icon-only class="mp-btn mp-btn-icon" title="Refresh table" :loading="refreshing" @click="refreshTable">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
                         <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
                     </svg>
-                </button>
-                <button class="mp-btn mp-btn-primary" @click="openEventCreate">+ Add event</button>
+                </ProgressButton>
+                <ProgressButton variant="primary" color="#0f766e" hover-color="#0d9488" text="+ Add event" @click="openEventCreate" />
             </div>
         </div>
 
@@ -134,7 +137,10 @@ onMounted(fetchEvents);
                 <thead>
                     <tr>
                         <th>Logo</th>
+                        <th>Code</th>
                         <th>Name</th>
+                        <th>Start</th>
+                        <th>End</th>
                         <th>Status</th>
                         <th>Venues</th>
                         <th>Updated</th>
@@ -143,14 +149,20 @@ onMounted(fetchEvents);
                 </thead>
                 <tbody>
                     <tr v-if="!filteredEvents.length">
-                        <td colspan="6" class="mp-dt-empty">No events found.</td>
+                        <td colspan="9" class="mp-dt-empty">No events found.</td>
                     </tr>
                     <tr v-for="ev in filteredEvents" :key="ev.id" class="mp-dt-row" @click="openEventEdit(ev)">
                         <td @click.stop>
                             <img v-if="ev.logo_url" :src="ev.logo_url" class="ev-logo-thumb" :alt="ev.name" />
                             <span v-else class="ev-logo-ph"><i class="bx bx-calendar"></i></span>
                         </td>
+                        <td class="mono">
+                            <span v-if="ev.code" class="mp-dtag ev-code-tag">{{ ev.code }}</span>
+                            <span v-else class="mp-muted">—</span>
+                        </td>
                         <td class="mp-dt-title">{{ ev.name }}</td>
+                        <td class="mp-dt-when">{{ ev.start_date ?? '—' }}</td>
+                        <td class="mp-dt-when">{{ ev.end_date ?? '—' }}</td>
                         <td>
                             <span v-if="ev.status_name" class="mp-pill"
                                 :style="{ background: evStatusStyle(ev.status_color).bg, color: evStatusStyle(ev.status_color).fg }">
@@ -169,8 +181,8 @@ onMounted(fetchEvents);
                         </td>
                         <td class="mp-dt-when">{{ ev.updated_at ?? '—' }}</td>
                         <td class="mp-dt-actions" @click.stop>
-                            <button class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEventEdit(ev)"><i class="bx bx-pencil"></i></button>
-                            <button class="mp-icon-btn mp-icon-del" title="Delete" @click="deleteEvent(ev)"><i class="bx bx-trash"></i></button>
+                            <ProgressButton icon-only class="mp-icon-btn mp-icon-edit" title="Edit" @click="openEventEdit(ev)"><i class="bx bx-pencil"></i></ProgressButton>
+                            <ProgressButton icon-only class="mp-icon-btn mp-icon-del" title="Delete" :loading="deletingEventId === ev.id" @click="deleteEvent(ev)"><i class="bx bx-trash"></i></ProgressButton>
                         </td>
                     </tr>
                 </tbody>
@@ -215,9 +227,6 @@ onMounted(fetchEvents);
 .mp-btn-icon { padding: 7px 9px; color: #76706a; }
 .mp-btn-icon:hover { color: #1a1614; }
 
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin .7s linear; }
-
 .mp-filterbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .mp-fb-search {
     display: flex; align-items: center; gap: 7px;
@@ -259,6 +268,7 @@ onMounted(fetchEvents);
     font-size: 12px; font-weight: 600;
 }
 
+.ev-code-tag { background: #f1f5f9; color: #475569; }
 .ev-logo-thumb { width: 40px; height: 40px; object-fit: contain; border-radius: 6px; border: 1px solid #e8e4db; background: #f6f5f1; padding: 2px; display: block; }
 .ev-logo-ph { width: 40px; height: 40px; border-radius: 6px; border: 1px solid #e8e4db; background: #f6f5f1; display: flex; align-items: center; justify-content: center; color: #a39d96; font-size: 18px; }
 .mp-icon-btn { width: 30px; height: 30px; border-radius: 6px; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; transition: background .15s; }
