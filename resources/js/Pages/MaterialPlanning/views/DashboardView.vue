@@ -68,6 +68,7 @@ function fmtMoney(n)   { return '$' + Number(n).toLocaleString('en-US'); }
 
 const avatarColors = ['#7c2d12','#0f766e','#b45309','#1d4ed8','#6b21a8','#155e75','#854d0e'];
 function avatarColor(initials) {
+    if (!initials) return '#a39d96';
     const h = (initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % avatarColors.length;
     return avatarColors[h];
 }
