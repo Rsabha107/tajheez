@@ -8,20 +8,16 @@ use App\Models\Ems\FunctionalArea;
 use App\Models\Ems\Venue;
 use App\Models\GlobalStatus;
 use App\Models\MaterialPlanning\Area;
-use App\Models\MaterialPlanning\CatalogItem;
 use App\Models\MaterialPlanning\ChangeOrder;
 use App\Models\MaterialPlanning\Domain;
 use App\Models\MaterialPlanning\ItemGroup;
 use App\Models\MaterialPlanning\ItemSubgroup;
 use App\Models\MaterialPlanning\MaterialRequest;
-use App\Models\MaterialPlanning\RequestLine;
-use App\Models\MaterialPlanning\ServiceOption;
-use App\Models\MaterialPlanning\ServiceOptionItem;
 use App\Models\MaterialPlanning\Space;
-use App\Models\MaterialPlanning\Supplier;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -63,6 +59,19 @@ class MaterialPlanningController extends Controller
         $domains = Domain::with('status')->withCount('itemGroups')->orderBy('sort_order')->get();
         $domainsByCode = $domains->keyBy('code');
 
+        // Topbar identity chip — same label rules as the People directory below,
+        // plus the fa_code of the user's own functional area (e.g. "MET").
+        $permissions['roleLabel'] = $isAdmin
+            ? 'Admin'
+            : ($user?->managed_domain
+                ? 'Category Lead — ' . ($domainsByCode->get($user->managed_domain)?->label ?? $user->managed_domain)
+                : ($user?->getRoleNames()->first()
+                    ? (string) Str::of($user->getRoleNames()->first())->replace('-', ' ')->title()
+                    : 'Team Member'));
+        $permissions['functionalAreaCode'] = $userFunctionalAreaIds
+            ? FunctionalArea::whereIn('id', $userFunctionalAreaIds)->value('fa_code')
+            : null;
+
         $areas = Area::with('status')->withCount('spaces')->orderBy('sort_order')->get();
         $spaces = Space::with(['area', 'status'])->orderBy('name')->get();
 
@@ -72,32 +81,20 @@ class MaterialPlanningController extends Controller
         $entityStatuses = GlobalStatus::where('is_active', 1)->get();
         $classifications = Classification::where('is_active', 1)->get();
 
-        $suppliers = Supplier::with(['classification', 'status'])->withAvg('serviceOptionItems', 'lead_days')->orderBy('name')->get();
-        $catalogItems = CatalogItem::orderBy('sku')->get();
-        $serviceOptions = ServiceOption::with(['classification', 'status', 'itemGroup', 'itemSubgroup', 'services.supplier'])->orderBy('id')->get();
-        $serviceOptionItems = ServiceOptionItem::with(['supplier', 'itemGroup', 'itemSubgroup'])->withCount('bundles')->orderBy('name')->get();
-
-        $requests = MaterialRequest::with([
-            'venue', 'owner', 'functionalArea', 'space', 'area',
-            'lines.catalogItem', 'lines.serviceOption.services.supplier',
-        ])
-            ->when(! $isAdmin, fn ($q) => $q->whereIn('functional_area_id', $userFunctionalAreaIds))
-            ->orderByDesc('id')->get();
-
         // Requests are scoped to a Functional Area — a regular user only ever picks
         // from the FA(s) they themselves are assigned to when raising a new request.
         $functionalAreas = FunctionalArea::query()
             ->when(! $isAdmin, fn ($q) => $q->whereIn('id', $userFunctionalAreaIds))
             ->orderBy('title')->get();
-        $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.services.supplier'])
-            ->orderByDesc('id')->get();
 
         // "People" is derived from real users: anyone referenced as an owner/approver,
         // plus anyone with a Material Planning role, so the directory always covers
         // domain managers/admins even if they don't currently own a seeded record.
+        // Requests/change-orders themselves are fetched separately (mp.requests.data /
+        // mp.change-orders.data), so only their owner/raiser id columns are pulled here.
         $referencedUserIds = collect()
-            ->merge($requests->pluck('owner_user_id'))
-            ->merge($changeOrders->pluck('raised_by_user_id'))
+            ->merge(MaterialRequest::whereNotNull('owner_user_id')->pluck('owner_user_id'))
+            ->merge(ChangeOrder::whereNotNull('raised_by_user_id')->pluck('raised_by_user_id'))
             ->filter()
             ->unique();
         $roleBasedUserIds = User::where(function ($q) {
@@ -236,174 +233,6 @@ class MaterialPlanningController extends Controller
                 'id' => $fa->id,
                 'code' => $fa->fa_code,
                 'title' => $fa->title,
-            ])->values()->all(),
-
-            'requests' => $requests->map(fn (MaterialRequest $r) => [
-                'id' => $r->code,
-                // Real numeric PK — `id` above is the human-readable code used
-                // everywhere else in the UI, but PUT/DELETE against a specific
-                // request needs the actual FK value (mp_requests.id).
-                'dbId' => $r->id,
-                'eventId' => $r->event_id,
-                'title' => $r->title,
-                'venue' => $r->venue?->short_name,
-                'functionalArea' => $r->functionalArea?->fa_code,
-                'site' => $r->site_name,
-                'domain' => $r->domain,
-                'status' => $r->status,
-                'items' => $r->items,
-                'qty' => $r->qty,
-                'value' => $r->value,
-                'submitted' => $r->submitted,
-                'updated' => $r->updated,
-                'owner' => $r->owner?->initials,
-                'priority' => $r->priority,
-                'space' => $r->space_id,
-                'spaceLabel' => $r->space?->name,
-                'area' => $r->area_id,
-                'areaLabel' => $r->area?->label,
-                'hasServiceOption' => $r->lines->contains(fn ($l) => $l->service_option_id !== null),
-            ])->values()->all(),
-
-            // Flat cross-request line-item list, denormalized with the parent request's
-            // venue/functional area/owner/space/area/move dates — powers the Items view's
-            // filters and bulk service-option assignment ("ship everything, filter client-side").
-            'requestLines' => $requests->flatMap(fn (MaterialRequest $r) => $r->lines->map(fn (RequestLine $l) => [
-                'id' => $l->id,
-                'requestId' => $r->code,
-                'requestTitle' => $r->title,
-                'eventId' => $l->event_id,
-                'status' => $r->status,
-                'sku' => $l->sku,
-                'name' => $l->catalogItem?->name,
-                'domain' => $l->domain,
-                'group' => $l->catalogItem?->group,
-                'sub' => $l->catalogItem?->sub,
-                'venue' => $r->venue?->short_name,
-                'functionalArea' => $r->functionalArea?->fa_code,
-                'ownerId' => $r->owner_user_id,
-                'ownerInitials' => $r->owner?->initials,
-                'space' => $r->space_id,
-                'spaceLabel' => $r->space?->name,
-                'area' => $r->area_id,
-                'areaLabel' => $r->area?->label,
-                'moveIn' => $r->move_in?->format('Y-m-d'),
-                'moveOut' => $r->move_out?->format('Y-m-d'),
-                'qty' => $l->qty,
-                'unit' => $l->unit,
-                'rate' => (float) $l->rate_snapshot,
-                'value' => round($l->qty * $l->rate_snapshot, 2),
-                'comment' => $l->comment,
-                'serviceOptionId' => $l->service_option_id,
-                'serviceOptionName' => $l->serviceOption?->name,
-                'supplierName' => $l->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
-            ]))->values()->all(),
-
-            'catalog' => $catalogItems->map(fn (CatalogItem $c) => [
-                'sku' => $c->sku,
-                'dbId' => $c->id,
-                'domain' => $c->domain_code,
-                'eventId' => $c->event_id,
-                'group' => $c->group,
-                'sub' => $c->sub,
-                'name' => $c->name,
-                'unit' => $c->unit,
-                'rate' => (float) $c->rate,
-                'stock' => $c->stock,
-                'baseline' => $c->baseline,
-            ])->values()->all(),
-
-            'suppliers' => $suppliers->map(fn (Supplier $s) => [
-                'id' => $s->id,
-                'code' => $s->code,
-                'name' => $s->name,
-                'kind' => $s->kind,
-                'classificationId' => $s->classification_id,
-                'classificationName' => $s->classification?->name,
-                'classificationColor' => $s->classification?->color,
-                'statusId' => $s->status_id,
-                'statusName' => $s->status?->name,
-                'statusColor' => $s->status?->color,
-                'msa' => $s->msa_reference ?? '—',
-                'contactName' => $s->contact_name,
-                'contactPhone' => $s->contact_phone,
-                'avgLeadDays' => $s->service_option_items_avg_lead_days !== null
-                    ? (int) round($s->service_option_items_avg_lead_days)
-                    : null,
-            ])->values()->all(),
-
-            'serviceOptions' => $serviceOptions->map(fn (ServiceOption $o) => [
-                'id' => $o->code,
-                // Real numeric PK — `id` above is the human-readable code used
-                // everywhere else in the UI, but assigning a line to an option
-                // needs the actual FK value (mp_request_lines.service_option_id).
-                'dbId' => $o->id,
-                'eventId' => $o->event_id,
-                'name' => $o->name,
-                'cost' => (float) $o->services->sum('cost'),
-                'lead' => (int) $o->services->max('lead_days'),
-                // Distinct suppliers behind this bundle's services, for a quick summary display.
-                'suppliers' => $o->services->pluck('supplier_code')->unique()->values()->all(),
-                'classificationId' => $o->classification_id,
-                'classificationName' => $o->classification?->name,
-                'classificationColor' => $o->classification?->color,
-                'statusId' => $o->status_id,
-                'statusName' => $o->status?->name,
-                'statusColor' => $o->status?->color,
-                'isDefault' => $o->is_default,
-                'itemGroupId' => $o->item_group_id,
-                'itemGroupLabel' => $o->itemGroup?->label,
-                'itemSubgroupId' => $o->item_subgroup_id,
-                'itemSubgroupLabel' => $o->itemSubgroup?->name,
-                'services' => $o->services->map(fn ($s) => [
-                    'id' => $s->id,
-                    'name' => $s->name,
-                    'supplier' => $s->supplier_code,
-                    'cost' => (float) $s->cost,
-                    'lead' => $s->lead_days,
-                    'sla' => $s->sla,
-                    'capacity' => $s->capacity,
-                    'contract' => $s->contract_reference ?? '—',
-                    'spec' => $s->spec ?? '—',
-                ])->values()->all(),
-            ])->values()->all(),
-
-            'serviceOptionItems' => $serviceOptionItems->map(fn (ServiceOptionItem $i) => [
-                'id' => $i->code,
-                'dbId' => $i->id,
-                'eventId' => $i->event_id,
-                'name' => $i->name,
-                'supplierCode' => $i->supplier_code,
-                'supplierName' => $i->supplier?->name,
-                'cost' => (float) $i->cost,
-                'lead' => $i->lead_days,
-                'sla' => $i->sla,
-                'capacity' => $i->capacity,
-                'contract' => $i->contract_reference ?? '—',
-                'spec' => $i->spec ?? '—',
-                'itemGroupId' => $i->item_group_id,
-                'itemGroupLabel' => $i->itemGroup?->label,
-                'itemSubgroupId' => $i->item_subgroup_id,
-                'itemSubgroupLabel' => $i->itemSubgroup?->name,
-                'usageCount' => $i->bundles_count,
-            ])->values()->all(),
-
-            'changeOrders' => $changeOrders->map(fn (ChangeOrder $co) => [
-                'id' => $co->code,
-                'eventId' => $co->request?->event_id,
-                'req' => $co->request?->code,
-                'context' => $co->context,
-                'venue' => $co->request?->venue?->short_name,
-                'domain' => $co->domain,
-                'reason' => $co->reason,
-                'raisedBy' => $co->raisedBy?->initials,
-                'raisedOn' => $co->raised_on?->format('M d'),
-                'age' => $co->age,
-                'rows' => $co->rows,
-                'state' => $co->state,
-                'stage' => $co->stage,
-                'delta' => $co->delta,
-                'title' => $co->title,
             ])->values()->all(),
 
             'coStates' => self::CO_STATES,

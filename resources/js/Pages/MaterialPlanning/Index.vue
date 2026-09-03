@@ -36,21 +36,55 @@ const props = defineProps({
     entityStatuses: Array,
     classifications: Array,
     people:         Array,
-    requests:       Array,
-    requestLines:   { type: Array, default: () => [] },
-    catalog:        Array,
-    suppliers:      Array,
     areas:          Array,
     spaces:         Array,
     itemGroups:     Array,
     itemSubgroups:  Array,
-    serviceOptions: Array,
-    serviceOptionItems: { type: Array, default: () => [] },
-    changeOrders:   Array,
     coStates:       Object,
     permissions:    Object,
     functionalAreas: { type: Array, default: () => [] },
 });
+
+// ── Lazily-fetched datasets ─────────────────────────────────────────────────
+// These are the heavy, single-view-owned collections (as opposed to the small
+// reference/lookup data above, which is cheap and needed by nearly every view,
+// so it stays an eager Inertia prop). Fetched over their own endpoints instead
+// of being shipped in the initial material-planning.index payload, and
+// re-fetched whenever their owning view is (re)opened — see the activePage
+// watch further down.
+const requests            = ref([]);
+const requestLines        = ref([]);
+const catalog             = ref([]);
+const suppliers           = ref([]);
+const serviceOptions      = ref([]);
+const serviceOptionItems  = ref([]);
+const changeOrders        = ref([]);
+
+async function fetchRequests() {
+    const { data } = await axios.get(route('mp.requests.data'));
+    requests.value = data.requests ?? [];
+    requestLines.value = data.requestLines ?? [];
+}
+async function fetchCatalog() {
+    const { data } = await axios.get(route('mp.catalog-items.data'));
+    catalog.value = data ?? [];
+}
+async function fetchSuppliers() {
+    const { data } = await axios.get(route('mp.suppliers.data'));
+    suppliers.value = data ?? [];
+}
+async function fetchServiceOptions() {
+    const [{ data: options }, { data: items }] = await Promise.all([
+        axios.get(route('mp.service-options.data')),
+        axios.get(route('mp.service-option-items.data')),
+    ]);
+    serviceOptions.value = options ?? [];
+    serviceOptionItems.value = items ?? [];
+}
+async function fetchChangeOrders() {
+    const { data } = await axios.get(route('mp.change-orders.data'));
+    changeOrders.value = data ?? [];
+}
 
 // ── Event selector ──────────────────────────────────────────────────────────
 // Active event is resolved server-side from the PHP session (see
@@ -89,10 +123,10 @@ const sidebarCollapsed = ref(false);
 // Badge counts are scoped to the active event and derived from the same
 // requests/changeOrders data the list views use, instead of being hardcoded.
 const navEventRequests = computed(() =>
-    activeEvent.value?.id ? props.requests.filter(r => r.eventId === activeEvent.value.id) : props.requests
+    activeEvent.value?.id ? requests.value.filter(r => r.eventId === activeEvent.value.id) : requests.value
 );
 const navEventChangeOrders = computed(() =>
-    activeEvent.value?.id ? props.changeOrders.filter(co => co.eventId === activeEvent.value.id) : props.changeOrders
+    activeEvent.value?.id ? changeOrders.value.filter(co => co.eventId === activeEvent.value.id) : changeOrders.value
 );
 
 const nav = computed(() => {
@@ -172,27 +206,62 @@ function goTo(id, payload = null) {
 // server rather than faking it client-side. Only navigate to the Requests list when
 // the request was actually submitted — a draft save should keep the user on the form.
 function onRequestSaved(navigate = true) {
-    router.reload({ only: ['requests', 'requestLines', 'people'], onFinish: () => { if (navigate) goTo('requests'); } });
+    fetchRequests();
+    router.reload({ only: ['people'], onFinish: () => { if (navigate) goTo('requests'); } });
 }
 
 // Requests were bulk-deleted, or the user clicked the refresh icon, in
 // RequestsView/ApprovalsView — refresh in place.
 const requestsRefreshing = ref(false);
-function refreshRequests() {
+async function refreshRequests() {
     requestsRefreshing.value = true;
-    router.reload({ only: ['requests', 'requestLines'], onFinish: () => { requestsRefreshing.value = false; } });
+    try { await fetchRequests(); } finally { requestsRefreshing.value = false; }
 }
 
 // User clicked the refresh icon in ServiceOptionsView — refresh in place.
 const serviceOptionsRefreshing = ref(false);
-function refreshServiceOptions() {
+async function refreshServiceOptions() {
     serviceOptionsRefreshing.value = true;
-    router.reload({ only: ['serviceOptions', 'serviceOptionItems', 'suppliers'], onFinish: () => { serviceOptionsRefreshing.value = false; } });
+    try { await Promise.all([fetchServiceOptions(), fetchSuppliers()]); } finally { serviceOptionsRefreshing.value = false; }
 }
+
+const catalogRefreshing = ref(false);
+async function refreshCatalog() {
+    catalogRefreshing.value = true;
+    try { await fetchCatalog(); } finally { catalogRefreshing.value = false; }
+}
+
+const suppliersRefreshing = ref(false);
+async function refreshSuppliers() {
+    suppliersRefreshing.value = true;
+    try { await fetchSuppliers(); } finally { suppliersRefreshing.value = false; }
+}
+
+const changeOrdersRefreshing = ref(false);
+async function refreshChangeOrders() {
+    changeOrdersRefreshing.value = true;
+    try { await fetchChangeOrders(); } finally { changeOrdersRefreshing.value = false; }
+}
+
+// Re-fetch a view's own dataset every time the user navigates into it, so
+// switching menu items shows current DB state instead of a stale snapshot
+// from whenever the app first loaded.
+watch(activePage, id => {
+    if (id === 'requests' || id === 'approvals' || id === 'items') refreshRequests();
+    else if (id === 'catalog') refreshCatalog();
+    else if (id === 'options') refreshServiceOptions();
+    else if (id === 'suppliers') refreshSuppliers();
+    else if (id === 'changes') refreshChangeOrders();
+});
 
 // ── User menu ──────────────────────────────────────────────────────────────
 const page = usePage();
 const authUser = computed(() => page.props.auth?.user ?? { name: 'Amal Rashid', email: '' });
+const userRoleLabel = computed(() => props.permissions?.roleLabel || 'Team Member');
+const userRoleWithFa = computed(() => {
+    const fa = props.permissions?.functionalAreaCode;
+    return fa ? `${userRoleLabel.value} · ${fa}` : userRoleLabel.value;
+});
 function initialsOf(name) {
     if (!name) return '—';
     const parts = name.trim().split(/\s+/);
@@ -243,25 +312,45 @@ const validPages = new Set([
     'permissions', 'roles', 'roles-permissions', 'users',
 ]);
 
+// First hash sync (on mount, restoring a refreshed URL) replaces the current
+// entry; every navigation after that pushes, so Back steps through the SPA's
+// own views one at a time instead of jumping straight past all of them to
+// whatever page (e.g. login) was open before this Inertia page loaded.
+let firstHashSync = true;
 watch([activePage, detailId], () => {
     const hash = '#' + (activePage.value === 'detail' && detailId.value
         ? `detail/${encodeURIComponent(detailId.value)}`
         : activePage.value);
-    if (window.location.hash !== hash) {
-        history.replaceState(null, '', hash);
+    const changed = window.location.hash !== hash;
+    if (firstHashSync) {
+        if (changed) history.replaceState(null, '', hash);
+        firstHashSync = false;
+        return;
     }
+    if (changed) history.pushState(null, '', hash);
 });
 
 function restoreFromHash() {
     const raw = window.location.hash.replace(/^#/, '');
-    if (!raw) return;
+    if (!raw) {
+        activePage.value = 'dash';
+        detailId.value = null;
+        return;
+    }
     if (raw.startsWith('detail/')) {
         const id = decodeURIComponent(raw.slice('detail/'.length));
         if (id) openRequest(id);
         return;
     }
-    if (validPages.has(raw) && !(sectionOf[raw] && !props.permissions.isAdmin)) activePage.value = raw;
+    if (validPages.has(raw) && !(sectionOf[raw] && !props.permissions.isAdmin)) {
+        activePage.value = raw;
+        detailId.value = null;
+    }
 }
+
+// Browser Back/Forward changes window.location.hash without touching our
+// refs — resync activePage/detailId to match so the visible view follows.
+function handlePopState() { restoreFromHash(); }
 
 // ── Workspace settings ────────────────────────────────────────────────────────
 // Backed by the `settings` DB table and cached in the PHP session (shared into
@@ -309,6 +398,15 @@ const vClickOutside = {
 
 onMounted(async () => {
     restoreFromHash();
+    window.addEventListener('popstate', handlePopState);
+
+    // Fire in parallel, unawaited — each view reacts as its own dataset arrives
+    // instead of the whole page waiting on one combined payload.
+    fetchRequests();
+    fetchCatalog();
+    fetchSuppliers();
+    fetchServiceOptions();
+    fetchChangeOrders();
 
     try {
         const { data } = await axios.get(route('events.data'), { params: { limit: 100, offset: 0 } });
@@ -319,6 +417,7 @@ onMounted(async () => {
         }
     } catch (_) {}
 });
+onBeforeUnmount(() => window.removeEventListener('popstate', handlePopState));
 </script>
 
 <template>
@@ -446,7 +545,7 @@ onMounted(async () => {
                             <span class="tb-avatar">{{ initialsOf(authUser.name) }}</span>
                             <div class="tb-user-meta">
                                 <div class="tb-user-name">{{ authUser.name }}</div>
-                                <div class="tb-user-role">Venue Planner · MET</div>
+                                <div class="tb-user-role">{{ userRoleWithFa }}</div>
                             </div>
                             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" class="tb-user-chev" :class="{ 'tb-user-chev-open': userMenuOpen }"><path d="M6 9l6 6 6-6"/></svg>
                         </button>
@@ -456,7 +555,7 @@ onMounted(async () => {
                                 <span class="tbm-avatar">{{ initialsOf(authUser.name) }}</span>
                                 <div class="tbm-profile-meta">
                                     <div class="tbm-name">{{ authUser.name }}</div>
-                                    <div class="tbm-role">Venue Planner</div>
+                                    <div class="tbm-role">{{ userRoleLabel }}</div>
                                     <div class="tbm-email"><span class="tbm-dot"/>{{ authUser.email }}</div>
                                 </div>
                             </div>

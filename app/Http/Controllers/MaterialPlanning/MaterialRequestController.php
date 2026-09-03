@@ -17,6 +17,83 @@ use Illuminate\Validation\Rule;
 class MaterialRequestController extends Controller
 {
     /**
+     * Requests + their flattened line items — moved out of the initial
+     * material-planning.index Inertia payload so this (the heaviest,
+     * most-frequently-changing dataset) is fetched over its own endpoint
+     * instead of being shipped on every page load.
+     */
+    public function data()
+    {
+        $user = auth()->user();
+        $isAdmin = $user?->hasRole('admin') ?? false;
+        $userFunctionalAreaIds = $user?->functionalAreas()->pluck('functional_areas.id')->all() ?? [];
+
+        $requests = MaterialRequest::with([
+            'venue', 'owner', 'functionalArea', 'space', 'area',
+            'lines.catalogItem', 'lines.serviceOption.services.supplier',
+        ])
+            ->when(! $isAdmin, fn ($q) => $q->whereIn('functional_area_id', $userFunctionalAreaIds))
+            ->orderByDesc('id')->get();
+
+        return response()->json([
+            'requests' => $requests->map(fn (MaterialRequest $r) => [
+                'id' => $r->code,
+                'dbId' => $r->id,
+                'eventId' => $r->event_id,
+                'title' => $r->title,
+                'venue' => $r->venue?->short_name,
+                'functionalArea' => $r->functionalArea?->fa_code,
+                'site' => $r->site_name,
+                'domain' => $r->domain,
+                'status' => $r->status,
+                'items' => $r->items,
+                'qty' => $r->qty,
+                'value' => $r->value,
+                'submitted' => $r->submitted,
+                'updated' => $r->updated,
+                'owner' => $r->owner?->initials,
+                'priority' => $r->priority,
+                'space' => $r->space_id,
+                'spaceLabel' => $r->space?->name,
+                'area' => $r->area_id,
+                'areaLabel' => $r->area?->label,
+                'hasServiceOption' => $r->lines->contains(fn ($l) => $l->service_option_id !== null),
+            ])->values()->all(),
+
+            'requestLines' => $requests->flatMap(fn (MaterialRequest $r) => $r->lines->map(fn (RequestLine $l) => [
+                'id' => $l->id,
+                'requestId' => $r->code,
+                'requestTitle' => $r->title,
+                'eventId' => $l->event_id,
+                'status' => $r->status,
+                'sku' => $l->sku,
+                'name' => $l->catalogItem?->name,
+                'domain' => $l->domain,
+                'group' => $l->catalogItem?->group,
+                'sub' => $l->catalogItem?->sub,
+                'venue' => $r->venue?->short_name,
+                'functionalArea' => $r->functionalArea?->fa_code,
+                'ownerId' => $r->owner_user_id,
+                'ownerInitials' => $r->owner?->initials,
+                'space' => $r->space_id,
+                'spaceLabel' => $r->space?->name,
+                'area' => $r->area_id,
+                'areaLabel' => $r->area?->label,
+                'moveIn' => $r->move_in?->format('Y-m-d'),
+                'moveOut' => $r->move_out?->format('Y-m-d'),
+                'qty' => $l->qty,
+                'unit' => $l->unit,
+                'rate' => (float) $l->rate_snapshot,
+                'value' => round($l->qty * $l->rate_snapshot, 2),
+                'comment' => $l->comment,
+                'serviceOptionId' => $l->service_option_id,
+                'serviceOptionName' => $l->serviceOption?->name,
+                'supplierName' => $l->serviceOption?->services->pluck('supplier.name')->unique()->filter()->implode(', '),
+            ]))->values()->all(),
+        ]);
+    }
+
+    /**
      * Full detail for one request — lines/approval steps/activity/change
      * orders are never included in the index() listing payload, so the
      * frontend fetches this fresh every time a request is opened rather

@@ -12,7 +12,7 @@ class SupplierController extends Controller
     public function data()
     {
         $suppliers = Supplier::with(['classification', 'status'])
-            ->withAvg('serviceOptions', 'lead_days')
+            ->withAvg('serviceOptionItems', 'lead_days')
             ->orderBy('name')->get();
 
         return response()->json($suppliers->map(fn (Supplier $s) => $this->present($s)));
@@ -37,7 +37,7 @@ class SupplierController extends Controller
 
         $supplier = Supplier::create($data);
 
-        return response()->json($this->present($supplier->load('classification', 'status')->loadAvg('serviceOptions', 'lead_days')), 201);
+        return response()->json($this->present($supplier->load('classification', 'status')->loadAvg('serviceOptionItems', 'lead_days')), 201);
     }
 
     public function update(Request $request, Supplier $supplier)
@@ -56,7 +56,7 @@ class SupplierController extends Controller
 
         $supplier->update($data);
 
-        return response()->json($this->present($supplier->load('classification', 'status')->loadAvg('serviceOptions', 'lead_days')));
+        return response()->json($this->present($supplier->load('classification', 'status')->loadAvg('serviceOptionItems', 'lead_days')));
     }
 
     public function destroy(Supplier $supplier)
@@ -99,8 +99,8 @@ class SupplierController extends Controller
             'msa' => $supplier->msa_reference ?? '—',
             'contactName' => $supplier->contact_name,
             'contactPhone' => $supplier->contact_phone,
-            'avgLeadDays' => $supplier->service_options_avg_lead_days !== null
-                ? (int) round($supplier->service_options_avg_lead_days)
+            'avgLeadDays' => $supplier->service_option_items_avg_lead_days !== null
+                ? (int) round($supplier->service_option_items_avg_lead_days)
                 : null,
         ];
     }

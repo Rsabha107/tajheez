@@ -15,6 +15,13 @@ class ServiceOptionController extends Controller
         'service_option_item_ids.*' => ['integer', 'exists:mp_service_option_items,id'],
     ];
 
+    public function data()
+    {
+        $options = ServiceOption::with(['classification', 'status', 'itemGroup', 'itemSubgroup', 'services.supplier'])->orderBy('id')->get();
+
+        return response()->json($options->map(fn (ServiceOption $o) => $this->present($o))->values()->all());
+    }
+
     public function store(Request $request)
     {
         Gate::authorize('create', ServiceOption::class);

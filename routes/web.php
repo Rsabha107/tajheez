@@ -161,18 +161,21 @@ Route::middleware('auth')->group(function () {
     Route::put('/api/settings/show-item-values', [SettingController::class, 'updateShowItemValues'])->name('settings.show-item-values.update');
 
     Route::controller(CatalogItemController::class)->group(function () {
+        Route::get('/api/mp/catalog-items', 'data')->name('mp.catalog-items.data');
         Route::post('/api/mp/catalog-items', 'store')->name('mp.catalog-items.store');
         Route::put('/api/mp/catalog-items/{catalogItem}', 'update')->name('mp.catalog-items.update');
         Route::delete('/api/mp/catalog-items/{catalogItem}', 'destroy')->name('mp.catalog-items.destroy');
     });
 
     Route::controller(ServiceOptionController::class)->group(function () {
+        Route::get('/api/mp/service-options', 'data')->name('mp.service-options.data');
         Route::post('/api/mp/service-options', 'store')->name('mp.service-options.store');
         Route::put('/api/mp/service-options/{serviceOption}', 'update')->name('mp.service-options.update');
         Route::delete('/api/mp/service-options/{serviceOption}', 'destroy')->name('mp.service-options.destroy');
     });
 
     Route::controller(ServiceOptionItemController::class)->group(function () {
+        Route::get('/api/mp/service-option-items', 'data')->name('mp.service-option-items.data');
         Route::post('/api/mp/service-option-items', 'store')->name('mp.service-option-items.store');
         Route::put('/api/mp/service-option-items/{serviceOptionItem}', 'update')->name('mp.service-option-items.update');
         Route::delete('/api/mp/service-option-items/{serviceOptionItem}', 'destroy')->name('mp.service-option-items.destroy');
@@ -224,6 +227,7 @@ Route::middleware('auth')->group(function () {
     });
 
     Route::controller(MaterialRequestController::class)->group(function () {
+        Route::get('/api/mp/requests', 'data')->name('mp.requests.data');
         Route::get('/api/mp/requests/{code}', 'show')->name('mp.requests.show');
         Route::post('/api/mp/requests', 'store')->name('mp.requests.store');
         Route::put('/api/mp/requests/{materialRequest}', 'update')->name('mp.requests.update');
@@ -240,6 +244,7 @@ Route::middleware('auth')->group(function () {
     });
 
     Route::controller(ChangeOrderController::class)->group(function () {
+        Route::get('/api/mp/change-orders', 'data')->name('mp.change-orders.data');
         Route::post('/api/mp/change-orders', 'store')->name('mp.change-orders.store');
         Route::put('/api/mp/change-orders/{changeOrder}', 'update')->name('mp.change-orders.update');
         Route::delete('/api/mp/change-orders/{changeOrder}', 'destroy')->name('mp.change-orders.destroy');

@@ -23,6 +23,13 @@ class ServiceOptionItemController extends Controller
         'spec' => ['nullable', 'string'],
     ];
 
+    public function data()
+    {
+        $items = ServiceOptionItem::with(['supplier', 'itemGroup', 'itemSubgroup'])->withCount('bundles')->orderBy('name')->get();
+
+        return response()->json($items->map(fn (ServiceOptionItem $i) => $this->present($i))->values()->all());
+    }
+
     public function store(Request $request)
     {
         Gate::authorize('create', ServiceOptionItem::class);

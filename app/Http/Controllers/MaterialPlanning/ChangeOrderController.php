@@ -10,6 +10,14 @@ use Illuminate\Support\Facades\Gate;
 
 class ChangeOrderController extends Controller
 {
+    public function data()
+    {
+        $changeOrders = ChangeOrder::with(['request.venue', 'raisedBy', 'lines.catalogItem', 'lines.serviceOptionAfter.services.supplier'])
+            ->orderByDesc('id')->get();
+
+        return response()->json($changeOrders->map(fn (ChangeOrder $co) => $this->present($co))->values()->all());
+    }
+
     public function store(Request $request)
     {
         Gate::authorize('create', ChangeOrder::class);
@@ -56,5 +64,27 @@ class ChangeOrderController extends Controller
         $changeOrder->delete();
 
         return response()->json(['message' => 'Change order deleted successfully.']);
+    }
+
+    /** Shape matches the mock change-order row exactly, for drop-in frontend compatibility. */
+    private function present(ChangeOrder $co): array
+    {
+        return [
+            'id' => $co->code,
+            'eventId' => $co->request?->event_id,
+            'req' => $co->request?->code,
+            'context' => $co->context,
+            'venue' => $co->request?->venue?->short_name,
+            'domain' => $co->domain,
+            'reason' => $co->reason,
+            'raisedBy' => $co->raisedBy?->initials,
+            'raisedOn' => $co->raised_on?->format('M d'),
+            'age' => $co->age,
+            'rows' => $co->rows,
+            'state' => $co->state,
+            'stage' => $co->stage,
+            'delta' => $co->delta,
+            'title' => $co->title,
+        ];
     }
 }

@@ -12,6 +12,13 @@ use Illuminate\Validation\Rule;
 
 class CatalogItemController extends Controller
 {
+    public function data()
+    {
+        $items = CatalogItem::orderBy('sku')->get();
+
+        return response()->json($items->map(fn (CatalogItem $c) => $this->present($c))->values()->all());
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
